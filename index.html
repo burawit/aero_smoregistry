@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ใบสมัครสมาชิกวิทยุการบิน</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="11" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.8 16.2c.7-1.5 1.9-2.2 3.2-2.2s2.5.7 3.2 2.2M14.5 10h4M14.5 13.5h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <div>
+            <div class="brand-title">สมาชิกวิทยุการบิน</div>
+            <div class="brand-sub">บ้านพักรับรอง / ศูนย์กีฬา</div>
+          </div>
+        </div>
+        <nav class="tabs" role="tablist" aria-label="เมนู">
+          <button type="button" class="tab is-active" role="tab" aria-selected="true" data-view="form">กรอกใบสมัคร</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-view="registry">ทะเบียนสมาชิก</button>
+        </nav>
+      </div>
+    </header>
+
+    <div id="demo-banner" class="banner" hidden>
+      <strong>โหมดทดลอง</strong> ยังไม่ได้เชื่อมต่อ Google Sheets — ข้อมูลจะถูกเก็บไว้ในเบราว์เซอร์นี้เท่านั้น
+    </div>
+
+    <main class="container">
+      <!-- ============ FORM ============ -->
+      <section id="view-form" class="view" aria-labelledby="form-title">
+        <div class="page-head">
+          <h1 id="form-title">ใบสมัครสมาชิกวิทยุการบิน</h1>
+          <p>กรอกข้อมูลผู้ยื่นและผู้เป็นสมาชิก (สูงสุด 6 คน) บันทึก แล้วพิมพ์ใบสมัครเพื่อลงลายมือชื่อและแนบเอกสาร</p>
+        </div>
+
+        <div id="renew-note" class="note" hidden></div>
+
+        <form id="app-form" novalidate>
+          <div class="card">
+            <h2 class="card-title"><span class="step">1</span>ข้อมูลผู้ยื่น</h2>
+            <div class="grid">
+              <label class="field">
+                <span class="label">วันที่ยื่น</span>
+                <input type="date" name="formDate" required>
+                <small class="hint" id="date-th"></small>
+              </label>
+              <label class="field span-2">
+                <span class="label">ชื่อ - สกุล</span>
+                <input name="applicantName" required maxlength="150" autocomplete="name">
+              </label>
+              <fieldset class="field span-3">
+                <legend class="label">ประเภท</legend>
+                <div class="seg" id="applicant-type"></div>
+              </fieldset>
+              <label class="field span-2">
+                <span class="label">สังกัด</span>
+                <input name="department" list="dept-list" required maxlength="150">
+              </label>
+              <label class="field">
+                <span class="label">ตำแหน่ง</span>
+                <input name="position" maxlength="150">
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2 class="card-title"><span class="step">2</span>มีความประสงค์ที่จะนำบุคคลต่อไปนี้</h2>
+            <div class="seg" id="purpose"></div>
+          </div>
+
+          <div class="card">
+            <h2 class="card-title"><span class="step">3</span>รายละเอียดผู้เป็นสมาชิก <span class="pill" id="member-count"></span></h2>
+            <div id="members" class="members"></div>
+            <button type="button" class="btn btn-ghost btn-add" id="add-member">+ เพิ่มสมาชิก</button>
+          </div>
+
+          <div class="card">
+            <h2 class="card-title"><span class="step">4</span>เอกสารแนบและค่าธรรมเนียม</h2>
+            <div class="grid grid-2">
+              <label class="field">
+                <span class="label">รูปถ่ายขนาด 1 นิ้ว คนละ 2 รูป (ใบ)</span>
+                <input type="number" name="photoCount" min="0" max="100" inputmode="numeric">
+              </label>
+              <label class="field">
+                <span class="label">สำเนาทะเบียนบ้าน / บัตรประชาชน / บัตรพนักงาน (ใบ)</span>
+                <input type="number" name="docCount" min="0" max="100" inputmode="numeric">
+              </label>
+            </div>
+            <table class="fees" id="fees"></table>
+          </div>
+
+          <div class="card">
+            <h2 class="card-title"><span class="step">5</span>คำรับรอง</h2>
+            <p class="cert" id="cert-text"></p>
+            <label class="check">
+              <input type="checkbox" name="agree" required>
+              <span>ข้าพเจ้าขอรับรองว่าข้อมูลข้างต้นเป็นความจริง และผู้สมัครยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ</span>
+            </label>
+          </div>
+
+          <p class="form-error" id="form-error" role="alert" hidden></p>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="reset-form">ล้างฟอร์ม</button>
+            <button type="submit" class="btn btn-primary" id="submit-btn">บันทึกใบสมัคร</button>
+          </div>
+        </form>
+
+        <div id="success" class="card success" hidden>
+          <div class="success-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h2>บันทึกใบสมัครแล้ว</h2>
+          <p>เลขที่ใบสมัคร <strong class="app-no" id="success-id"></strong></p>
+          <p class="muted" id="success-summary"></p>
+          <p class="muted">พิมพ์ใบสมัคร ลงลายมือชื่อ แล้วส่งพร้อมรูปถ่าย สำเนาเอกสาร และค่าธรรมเนียมให้เจ้าหน้าที่</p>
+          <div class="form-actions center">
+            <button type="button" class="btn btn-ghost" id="new-form">กรอกใบใหม่</button>
+            <button type="button" class="btn btn-primary" id="print-saved">พิมพ์ใบสมัคร</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ REGISTRY ============ -->
+      <section id="view-registry" class="view" aria-labelledby="reg-title" hidden>
+        <div class="page-head">
+          <h1 id="reg-title">ทะเบียนสมาชิก</h1>
+          <p>สำหรับเจ้าหน้าที่ — ค้นหา ตรวจสอบรายชื่อที่ต้องต่ออายุ พิมพ์ใบสมัคร และส่งออกข้อมูล</p>
+        </div>
+
+        <div id="lock" class="card lock" hidden>
+          <form id="lock-form">
+            <label class="field">
+              <span class="label">รหัสเจ้าหน้าที่</span>
+              <input type="password" name="key" required autocomplete="current-password">
+            </label>
+            <button type="submit" class="btn btn-primary">เข้าสู่ทะเบียน</button>
+          </form>
+          <p class="form-error" id="lock-error" hidden></p>
+        </div>
+
+        <div id="registry" hidden>
+          <div class="tiles" id="tiles"></div>
+          <div class="toolbar">
+            <input type="search" id="f-q" placeholder="ค้นหาชื่อสมาชิก ผู้ยื่น สังกัด หรือเลขที่ใบสมัคร" aria-label="ค้นหา">
+            <select id="f-year" aria-label="ปี"></select>
+            <select id="f-dept" aria-label="สังกัด"></select>
+            <select id="f-status" aria-label="สถานะ">
+              <option value="all">ทุกสถานะ</option>
+              <option value="active">ใช้งานปีนี้</option>
+              <option value="renew">ต้องต่ออายุ</option>
+            </select>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="refresh">รีเฟรช</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="export">ส่งออก CSV</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="logout" hidden>ออกจากระบบ</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="reg-table" id="reg-table"></table>
+          </div>
+          <p class="muted small" id="reg-count"></p>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <datalist id="dept-list"></datalist>
+    <datalist id="rel-list"></datalist>
+  </div>
+
+  <div id="print-root"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

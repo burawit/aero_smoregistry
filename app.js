@@ -1,0 +1,720 @@
+/* ใบสมัครสมาชิกวิทยุการบิน — front end (vanilla JS, no build step) */
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------------ config
+  const CFG = Object.assign({
+    API_URL: '', MEMBER_FEE: 100, CARD_FEE: 20, CARD_FEE_ON_RENEW: false, MAX_MEMBERS: 6,
+    ADDRESSEE: 'ผศข.บภ 2.', DIRECTOR_TITLE: 'ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่',
+    COMPANY_NAME: 'บริษัท วิทยุการบินแห่งประเทศไทย จำกัด', DEPARTMENTS: [], RELATIONSHIPS: [],
+  }, window.APP_CONFIG || {});
+  const DEMO = !CFG.API_URL;
+
+  const APPLICANT_TYPES = ['พนักงาน', 'ลูกจ้าง', 'พนักงานเกษียณอายุ'];
+  const MEMBERSHIP = ['สมัครใหม่', 'ต่ออายุ'];
+  const PURPOSES = [['สมัครใหม่', 'สมัครเข้าเป็นสมาชิกใหม่'], ['ต่ออายุ', 'ต่ออายุสมาชิก']];
+  const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const CERT_TEXT = 'ข้าพเจ้าขอรับรองว่าข้อความข้างต้นของผู้สมัครเป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้' +
+    'ยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ ทุกประการ และจะไม่เรียกร้องค่าเสียหายใด ๆ ' +
+    'หากเกิดอันตรายหรือบาดเจ็บขณะอยู่ในบริเวณบ้านพักรับรองหรือศูนย์กีฬาของ ' + CFG.COMPANY_NAME;
+  const KEY_STORE = 'mr-staff-key';
+  const DEMO_STORE = 'mr-demo-db';
+
+  // ------------------------------------------------------------------ utils
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const baht = (n) => Number(n || 0).toLocaleString('th-TH');
+  const pad = (n) => String(n).padStart(2, '0');
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const parts = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? { y: +m[1], m: +m[2], d: +m[3] } : null; };
+  const curYearBE = () => new Date().getFullYear() + 543;
+  const thLong = (iso) => { const p = parts(iso); return p ? `${p.d} ${TH_MONTHS[p.m - 1]} พ.ศ. ${p.y + 543}` : ''; };
+  const thShort = (iso) => { const p = parts(iso); return p ? `${p.d}/${p.m}/${p.y + 543}` : ''; };
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  function store(kind) {
+    try { return kind === 'session' ? window.sessionStorage : window.localStorage; } catch (e) { return null; }
+  }
+  const kv = {
+    get(k, kind) { try { const s = store(kind); return s ? s.getItem(k) : null; } catch (e) { return null; } },
+    set(k, v, kind) { try { const s = store(kind); if (s) s.setItem(k, v); } catch (e) { /* ignore */ } },
+    del(k, kind) { try { const s = store(kind); if (s) s.removeItem(k); } catch (e) { /* ignore */ } },
+  };
+
+  let toastTimer;
+  function toast(msg, isError) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.toggle('error', !!isError);
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+
+  function computeFees(members) {
+    const count = members.length;
+    const newCount = members.filter((m) => m.membership === 'สมัครใหม่').length;
+    const cardPeople = CFG.CARD_FEE_ON_RENEW ? count : newCount;
+    const memberFee = count * CFG.MEMBER_FEE;
+    const cardFee = cardPeople * CFG.CARD_FEE;
+    return { count, newCount, renewCount: count - newCount, cardPeople, memberFee, cardFee, total: memberFee + cardFee };
+  }
+
+  // ------------------------------------------------------------------ API
+  async function call(action, payload) {
+    let res;
+    try {
+      // text/plain body = "simple" request, so Apps Script needs no CORS preflight
+      res = await fetch(CFG.API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, payload || {})) });
+    } catch (e) {
+      throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่');
+    }
+    let data;
+    try { data = await res.json(); } catch (e) {
+      throw new Error('เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (ตรวจสอบ API_URL และการ deploy)');
+    }
+    if (!data.ok) {
+      const err = new Error(data.error || 'เกิดข้อผิดพลาด');
+      err.code = data.code;
+      throw err;
+    }
+    return data;
+  }
+
+  // Demo backend: same shapes as Code.gs, stored in this browser only.
+  const demo = (() => {
+    let mem = null;
+    const empty = () => ({ applications: [], members: [], seq: {} });
+    const load = () => {
+      if (mem) return mem;
+      try { mem = JSON.parse(kv.get(DEMO_STORE)) || empty(); } catch (e) { mem = empty(); }
+      return mem;
+    };
+    const save = (db) => { mem = db; kv.set(DEMO_STORE, JSON.stringify(db)); };
+    return {
+      submit(d) {
+        const db = load();
+        const yearBE = parts(d.formDate).y + 543;
+        db.seq[yearBE] = (db.seq[yearBE] || 0) + 1;
+        const appId = `${yearBE}-${String(db.seq[yearBE]).padStart(4, '0')}`;
+        const f = computeFees(d.members);
+        const createdAt = new Date().toISOString();
+        const application = {
+          app_id: appId, year_be: yearBE, form_date: d.formDate, applicant_name: d.applicantName,
+          applicant_type: d.applicantType, department: d.department, position: d.position, purpose: d.purpose,
+          member_count: f.count, new_count: f.newCount, renew_count: f.renewCount,
+          photo_count: d.photoCount, doc_count: d.docCount, member_fee: f.memberFee, card_fee: f.cardFee,
+          total_fee: f.total, renewed_from: d.renewedFrom || '', created_at: createdAt,
+        };
+        const members = d.members.map((m, i) => ({
+          app_id: appId, seq: i + 1, full_name: m.fullName, age: m.age, address: m.address,
+          relationship: m.relationship, membership: m.membership, year_be: yearBE,
+          applicant_name: d.applicantName, department: d.department, created_at: createdAt,
+        }));
+        db.applications.push(application);
+        db.members.push(...members);
+        save(db);
+        return { ok: true, appId, application, members };
+      },
+      list() {
+        const db = load();
+        return { ok: true, applications: db.applications.slice(), members: db.members.slice() };
+      },
+    };
+  })();
+
+  const api = {
+    submit: (data) => (DEMO ? Promise.resolve(demo.submit(data)) : call('submit', { data })),
+    list: (key) => (DEMO ? Promise.resolve(demo.list()) : call('list', { key })),
+  };
+
+  // ------------------------------------------------------------------ views
+  function switchView(name) {
+    $$('.tab').forEach((t) => {
+      const on = t.dataset.view === name;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', String(on));
+    });
+    $('#view-form').hidden = name !== 'form';
+    $('#view-registry').hidden = name !== 'registry';
+    if (history.replaceState) history.replaceState(null, '', name === 'registry' ? '#registry' : location.pathname + location.search);
+    if (name === 'registry') openRegistry();
+  }
+
+  // ================================================================== FORM
+  const form = $('#app-form');
+  let state;
+  let lastSaved = null;
+
+  const blankMember = (membership) => ({ fullName: '', age: '', address: '', relationship: '', membership: membership || 'สมัครใหม่' });
+
+  function radios(name, options, selected) {
+    return options.map(([value, label]) =>
+      `<label><input type="radio" name="${name}" value="${esc(value)}"${value === selected ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
+  }
+
+  function buildStatic() {
+    $('#applicant-type').innerHTML = radios('applicantType', APPLICANT_TYPES.map((t) => [t, t]), 'พนักงาน');
+    $('#purpose').innerHTML = radios('purpose', PURPOSES, 'สมัครใหม่');
+    $('#cert-text').textContent = CERT_TEXT;
+    $('#dept-list').innerHTML = (CFG.DEPARTMENTS || []).map((d) => `<option value="${esc(d)}">`).join('');
+    $('#rel-list').innerHTML = (CFG.RELATIONSHIPS || []).map((d) => `<option value="${esc(d)}">`).join('');
+  }
+
+  function resetForm() {
+    form.reset();
+    state = { members: [blankMember()], renewedFrom: '' };
+    form.formDate.value = todayISO();
+    form.querySelector('input[name=applicantType][value="พนักงาน"]').checked = true;
+    form.querySelector('input[name=purpose][value="สมัครใหม่"]').checked = true;
+    delete form.photoCount.dataset.touched;
+    delete form.docCount.dataset.touched;
+    $('#renew-note').hidden = true;
+    $('#form-error').hidden = true;
+    $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
+    renderMembers();
+    updateDateHint();
+  }
+
+  function renderMembers() {
+    const max = CFG.MAX_MEMBERS;
+    $('#members').innerHTML = state.members.map((m, i) => `
+      <div class="member" data-i="${i}">
+        <div class="member-head">
+          <span class="member-no">${i + 1}</span>
+          <span class="member-label">สมาชิกลำดับที่ ${i + 1}</span>
+          <div class="member-tools">
+            ${i > 0 ? '<button type="button" class="link-btn" data-act="copy-address">ใช้ที่อยู่เดียวกับลำดับที่ 1</button>' : ''}
+            ${state.members.length > 1 ? `<button type="button" class="icon-btn" data-act="remove" aria-label="ลบสมาชิกลำดับที่ ${i + 1}">&times;</button>` : ''}
+          </div>
+        </div>
+        <div class="grid">
+          <label class="field span-2"><span class="label">ชื่อ - สกุล</span>
+            <input data-k="fullName" value="${esc(m.fullName)}" maxlength="150" required></label>
+          <label class="field"><span class="label">อายุ (ปี)</span>
+            <input data-k="age" type="number" min="0" max="120" inputmode="numeric" value="${esc(m.age)}" required></label>
+          <label class="field span-3"><span class="label">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน (ที่สามารถติดต่อได้)</span>
+            <textarea data-k="address" rows="2" maxlength="400" required>${esc(m.address)}</textarea></label>
+          <label class="field span-2"><span class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น</span>
+            <input data-k="relationship" list="rel-list" value="${esc(m.relationship)}" maxlength="150" required></label>
+          <fieldset class="field"><legend class="label">สมาชิกภาพ</legend>
+            <div class="seg small" data-k="membership">${radios(`membership-${i}`, MEMBERSHIP.map((v) => [v, v]), m.membership)}</div>
+          </fieldset>
+        </div>
+      </div>`).join('');
+    $('#add-member').hidden = state.members.length >= max;
+    $('#member-count').textContent = `${state.members.length} / ${max} คน`;
+    updateCountsAndFees();
+  }
+
+  function updateDateHint() {
+    $('#date-th').textContent = thLong(form.formDate.value);
+  }
+
+  function updateCountsAndFees() {
+    const n = state.members.length;
+    if (!form.photoCount.dataset.touched) form.photoCount.value = n * 2;
+    if (!form.docCount.dataset.touched) form.docCount.value = n;
+    const f = computeFees(state.members);
+    $('#fees').innerHTML = `
+      <tr><td>เงินค่าสมาชิก <span class="calc">${CFG.MEMBER_FEE} บาท/คน/ปี × ${f.count} คน</span></td><td>${baht(f.memberFee)} บาท</td></tr>
+      <tr><td>ค่าบัตรสมาชิก <span class="calc">${CFG.CARD_FEE} บาท/คน × ${f.cardPeople} คน${CFG.CARD_FEE_ON_RENEW ? '' : ' (เฉพาะสมัครใหม่)'}</span></td><td>${baht(f.cardFee)} บาท</td></tr>
+      <tr class="total"><td>รวมทั้งสิ้น</td><td>${baht(f.total)} บาท</td></tr>`;
+  }
+
+  function onMembersInput(e) {
+    const card = e.target.closest('.member');
+    if (!card) return;
+    const i = Number(card.dataset.i);
+    const k = e.target.dataset.k || (e.target.type === 'radio' ? 'membership' : null);
+    if (!k) return;
+    state.members[i][k] = e.target.value;
+    e.target.classList.remove('invalid');
+    if (k === 'membership') { e.target.closest('.seg').classList.remove('invalid'); updateCountsAndFees(); }
+  }
+
+  function onMembersClick(e) {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const i = Number(btn.closest('.member').dataset.i);
+    if (btn.dataset.act === 'remove') {
+      state.members.splice(i, 1);
+      renderMembers();
+    } else if (btn.dataset.act === 'copy-address') {
+      state.members[i].address = state.members[0].address;
+      const ta = btn.closest('.member').querySelector('[data-k=address]');
+      ta.value = state.members[i].address;
+      ta.classList.remove('invalid');
+    }
+  }
+
+  function addMember() {
+    if (state.members.length >= CFG.MAX_MEMBERS) return;
+    const purpose = (form.querySelector('input[name=purpose]:checked') || {}).value;
+    state.members.push(blankMember(purpose === 'ต่ออายุ' ? 'ต่ออายุ' : 'สมัครใหม่'));
+    renderMembers();
+    const cards = $$('.member');
+    cards[cards.length - 1].querySelector('input').focus();
+  }
+
+  function collect() {
+    const checked = (name) => (form.querySelector(`input[name="${name}"]:checked`) || {}).value || '';
+    const int = (v) => (v === '' || v == null ? '' : Number(v));
+    return {
+      formDate: form.formDate.value,
+      applicantName: form.applicantName.value.trim(),
+      applicantType: checked('applicantType'),
+      department: form.department.value.trim(),
+      position: form.position.value.trim(),
+      purpose: checked('purpose'),
+      photoCount: int(form.photoCount.value),
+      docCount: int(form.docCount.value),
+      renewedFrom: state.renewedFrom || '',
+      members: state.members.map((m) => ({
+        fullName: String(m.fullName).trim(), age: int(m.age), address: String(m.address).trim(),
+        relationship: String(m.relationship).trim(), membership: m.membership,
+      })),
+      agree: form.agree.checked,
+    };
+  }
+
+  function validate(d) {
+    $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
+    const errors = [];
+    const bad = (el, msg) => { if (el) el.classList.add('invalid'); errors.push({ el, msg }); };
+    if (!parts(d.formDate)) bad(form.formDate, 'กรุณาระบุวันที่ยื่น');
+    if (!d.applicantName) bad(form.applicantName, 'กรุณากรอกชื่อ - สกุล ผู้ยื่น');
+    if (!d.applicantType) bad($('#applicant-type'), 'กรุณาเลือกประเภทผู้ยื่น');
+    if (!d.department) bad(form.department, 'กรุณากรอกสังกัด');
+    if (!d.purpose) bad($('#purpose'), 'กรุณาเลือกความประสงค์');
+    d.members.forEach((m, i) => {
+      const card = $(`.member[data-i="${i}"]`);
+      const f = (k) => card.querySelector(`[data-k=${k}]`);
+      const n = i + 1;
+      if (!m.fullName) bad(f('fullName'), `กรุณากรอกชื่อ - สกุล สมาชิกลำดับที่ ${n}`);
+      if (m.age === '' || !Number.isInteger(m.age) || m.age < 0 || m.age > 120) bad(f('age'), `อายุของสมาชิกลำดับที่ ${n} ไม่ถูกต้อง`);
+      if (!m.address) bad(f('address'), `กรุณากรอกที่อยู่ของสมาชิกลำดับที่ ${n}`);
+      if (!m.relationship) bad(f('relationship'), `กรุณากรอกฐานะของสมาชิกลำดับที่ ${n}`);
+      if (!MEMBERSHIP.includes(m.membership)) bad(f('membership'), `กรุณาเลือกสมาชิกภาพลำดับที่ ${n}`);
+    });
+    [['photoCount', 'จำนวนรูปถ่าย'], ['docCount', 'จำนวนสำเนาเอกสาร']].forEach(([k, label]) => {
+      if (!Number.isInteger(d[k]) || d[k] < 0 || d[k] > 100) bad(form[k], `${label}ไม่ถูกต้อง`);
+    });
+    if (!d.agree) bad(form.agree.closest('.check'), 'กรุณาติ๊กรับรองข้อมูล');
+    return errors;
+  }
+
+  function showFormError(msgs) {
+    const box = $('#form-error');
+    if (!msgs.length) { box.hidden = true; return; }
+    box.innerHTML = msgs.length === 1 ? esc(msgs[0]) :
+      `กรุณาตรวจสอบ ${msgs.length} รายการ:<br>` + msgs.slice(0, 5).map((m) => '• ' + esc(m)).join('<br>') + (msgs.length > 5 ? '<br>…' : '');
+    box.hidden = false;
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    const d = collect();
+    const errors = validate(d);
+    if (errors.length) {
+      showFormError(errors.map((x) => x.msg));
+      const first = errors[0].el;
+      if (first) {
+        first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const focusable = first.matches('input,textarea,select') ? first : first.querySelector('input');
+        if (focusable) focusable.focus({ preventScroll: true });
+      }
+      return;
+    }
+    showFormError([]);
+    const btn = $('#submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'กำลังบันทึก…';
+    try {
+      const r = await api.submit(d);
+      lastSaved = { application: r.application, members: r.members };
+      reg.loaded = false;
+      $('#success-id').textContent = r.appId;
+      $('#success-summary').textContent =
+        `${r.application.applicant_name} · สมาชิก ${r.members.length} คน · ค่าธรรมเนียมรวม ${baht(r.application.total_fee)} บาท`;
+      form.hidden = true;
+      $('#renew-note').hidden = true;
+      $('#success').hidden = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      showFormError([err.message || 'บันทึกไม่สำเร็จ']);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'บันทึกใบสมัคร';
+    }
+  }
+
+  function startNewForm() {
+    resetForm();
+    $('#success').hidden = true;
+    form.hidden = false;
+    window.scrollTo({ top: 0 });
+  }
+
+  function prefillRenewal(appId) {
+    const app = reg.appsById[appId];
+    if (!app) return;
+    const ms = (reg.membersByApp[appId] || []).slice().sort((a, b) => a.seq - b.seq).slice(0, CFG.MAX_MEMBERS);
+    const diff = Math.max(0, curYearBE() - Number(app.year_be));
+    startNewForm();
+    form.applicantName.value = app.applicant_name || '';
+    const t = form.querySelector(`input[name=applicantType][value="${app.applicant_type}"]`);
+    if (t) t.checked = true;
+    form.department.value = app.department || '';
+    form.position.value = app.position || '';
+    form.querySelector('input[name=purpose][value="ต่ออายุ"]').checked = true;
+    state.members = ms.map((m) => ({
+      fullName: m.full_name, age: m.age === '' ? '' : Number(m.age) + diff, address: m.address,
+      relationship: m.relationship, membership: 'ต่ออายุ',
+    }));
+    if (!state.members.length) state.members = [blankMember('ต่ออายุ')];
+    state.renewedFrom = appId;
+    renderMembers();
+    const note = $('#renew-note');
+    note.textContent = `ต่ออายุจากใบสมัครเลขที่ ${appId} (ปี ${app.year_be})` +
+      (diff ? ` · ปรับอายุสมาชิกเพิ่ม ${diff} ปีแล้ว` : '') + ' — ตรวจสอบข้อมูลก่อนบันทึก';
+    note.hidden = false;
+    switchView('form');
+    toast('โหลดข้อมูลสำหรับต่ออายุแล้ว');
+  }
+
+  // ================================================================== PRINT
+  const fill = (v, width, cls) =>
+    `<span class="pf-fill${cls ? ' ' + cls : ''}"${width ? ` style="width:${width}"` : ''}>${esc(v)}</span>`;
+  const box = (on) => `<span class="pf-box${on ? ' on' : ''}"></span>`;
+  const blankDate = () => `วันที่ ${fill('', '14mm')}/${fill('', '14mm')}/${fill('', '18mm')}`;
+
+  function renderPrint(app, members) {
+    const p = parts(app.form_date) || { d: '', m: 1, y: '' };
+    const ms = members.slice().sort((a, b) => a.seq - b.seq);
+    const foot = (n) => `<div class="pf-foot"><span>ใบสมัครสมาชิกวิทยุการบิน (ปรับปรุง พ.ศ. 2569) · เลขที่ ${esc(app.app_id)}</span><span>หน้า ${n} / 2</span></div>`;
+    const rows = Array.from({ length: CFG.MAX_MEMBERS }, (_, i) => {
+      const m = ms[i];
+      const opts = MEMBERSHIP.map((v) => `<span class="opt">${box(m && m.membership === v)}${v}</span>`).join('');
+      return m
+        ? `<tr><td class="c">${i + 1}.</td><td class="val">${esc(m.full_name)}</td><td class="c val">${esc(m.age)}</td>
+             <td class="val">${esc(m.address)}</td><td class="val">${esc(m.relationship)}</td><td>${opts}</td><td></td></tr>`
+        : `<tr><td class="c">${i + 1}.</td><td></td><td></td><td></td><td></td><td>${opts}</td><td></td></tr>`;
+    }).join('');
+
+    const page1 = `
+      <section class="pf-page">
+        <div class="pf-title">ใบสมัครสมาชิกวิทยุการบิน</div>
+        <div class="pf-top">
+          <div class="pf-top-left">
+            <div class="pf-row">วันที่ ${fill(p.d, '14mm')} เดือน ${fill(TH_MONTHS[p.m - 1], '32mm')} พ.ศ. ${fill(p.y ? p.y + 543 : '', '18mm')}</div>
+            <div class="pf-row">ชื่อ - สกุล ${fill(app.applicant_name, '', 'grow')}</div>
+            <div class="pf-row">${APPLICANT_TYPES.map((t) => `<span class="pf-opt">${box(app.applicant_type === t)}${t}</span>`).join('')}</div>
+            <div class="pf-row">สังกัด ${fill(app.department, '', 'grow')}</div>
+          </div>
+          <table class="pf-staffbox">
+            <tr><td class="hd" rowspan="2">สำหรับ<br>เจ้าหน้าที่</td><td>รับสมัครเมื่อ</td><td>ผู้รับ</td></tr>
+            <tr><td class="blank"></td><td class="blank"></td></tr>
+          </table>
+        </div>
+        <div class="pf-row">มีความประสงค์ที่จะนำบุคคลต่อไปนี้</div>
+        <div class="pf-row pf-indent1">${PURPOSES.map(([v, l]) => `<span class="pf-opt">${box(app.purpose === v)}${l}</span>`).join('')}</div>
+        <div class="pf-row">(โปรดระบุรายละเอียดผู้เป็นสมาชิก)</div>
+        <table class="pf-members">
+          <colgroup><col style="width:7%"><col style="width:21%"><col style="width:7%"><col style="width:25%"><col style="width:13%"><col style="width:14%"><col style="width:13%"></colgroup>
+          <thead><tr><th>ลำดับ</th><th>ชื่อ - สกุล</th><th>อายุ</th><th>สถานที่อยู่อาศัย /<br>ทำงานในปัจจุบัน<br>(ที่สามารถติดต่อได้)</th>
+            <th>ฐานะที่<br>เกี่ยวข้อง<br>กับผู้ยื่น</th><th>สมาชิกภาพ</th><th>ลายมือชื่อ<br>ผู้สมัคร</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${foot(1)}
+      </section>`;
+
+    const page2 = `
+      <section class="pf-page">
+        <div class="pf-h2">คำรับรองของพนักงาน / ลูกจ้าง / พนักงานเกษียณอายุ</div>
+        <p class="pf-cert">${esc(CERT_TEXT)}</p>
+        <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบเอกสารหลักฐานในการสมัครเป็นสมาชิก มาดังนี้</p>
+        <table class="pf-attach">
+          <tr><td class="n">1.</td><td>รูปถ่ายขนาด 1 นิ้ว หน้าตรง ไม่สวมหมวก ของผู้สมัครคนละ 2 รูป</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} ใบ</td></tr>
+          <tr><td class="n">2.</td><td>สำเนาทะเบียนบ้าน / บัตรประจำตัวประชาชน / บัตรประจำตัวพนักงาน ของผู้สมัครแต่ละคน</td><td class="amt">จำนวน ${fill(app.doc_count, '26mm')} ใบ</td></tr>
+          <tr><td class="n">3.</td><td>เงินค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
+          <tr><td class="n">4.</td><td>ค่าบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
+        </table>
+        <div class="pf-sign">
+          <div class="pf-row">ลายมือชื่อ ${fill('', '', 'grow')}</div>
+          <div class="pf-row">ตำแหน่ง ${fill(app.position, '', 'grow')}</div>
+          <div class="pf-row">วันที่ ${fill(thShort(app.form_date), '', 'grow')}</div>
+        </div>
+        <hr class="pf-cut">
+        <div class="pf-staff">
+          <div class="pf-staff-hd">สำหรับเจ้าหน้าที่</div>
+          <div class="pf-staff-body">
+            <div class="pf-row"><b>เรียน</b>&nbsp;${esc(CFG.ADDRESSEE)}</div>
+            <div class="pf-row pf-indent1">${box()}เห็นควรอนุมัติให้เข้าเป็นสมาชิกได้โดย</div>
+            <div class="pf-row pf-indent2">${box()}เรียกเก็บค่าบัตรสมาชิกของผู้สมัครได้ในลำดับที่ ${fill('', '40mm')}</div>
+            <div class="pf-row pf-indent2">${box()}ไม่เรียกเก็บค่าบัตรสมาชิกของผู้สมัครในลำดับที่ ${fill('', '40mm')}</div>
+            <div class="pf-row pf-indent2">${box()}เก็บค่าสมาชิกของผู้สมัครในลำดับที่ ${fill('', '40mm')}</div>
+            <div class="pf-row pf-indent1">${box()}ไม่อาจดำเนินการได้</div>
+            <div class="pf-row">เนื่องจาก ${fill('', '', 'grow')}</div>
+            <div class="pf-row">${fill('', '', 'grow')}</div>
+            <div class="pf-sign">
+              <div class="pf-row">ลงชื่อ ${fill('', '', 'grow')} เจ้าหน้าที่</div>
+              <div class="pf-row">${blankDate()}</div>
+            </div>
+            <div class="pf-row">คำสั่ง ${fill('', '', 'grow')}</div>
+            <div class="pf-row">${fill('', '', 'grow')}</div>
+            <div class="pf-sign">
+              <div class="pf-row">ลงชื่อ ${fill('', '', 'grow')}</div>
+              <div class="pf-center">${esc(CFG.DIRECTOR_TITLE)}</div>
+              <div class="pf-row">${blankDate()}</div>
+            </div>
+          </div>
+        </div>
+        ${foot(2)}
+      </section>`;
+    return page1 + page2;
+  }
+
+  function printApplication(app, members) {
+    $('#print-root').innerHTML = renderPrint(app, members);
+    const go = () => window.print();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(go); else go();
+  }
+
+  // ================================================================== REGISTRY
+  const reg = { loaded: false, loading: false, rows: [], apps: [], appsById: {}, membersByApp: {} };
+
+  function showLock(msg) {
+    $('#registry').hidden = true;
+    $('#lock').hidden = false;
+    const err = $('#lock-error');
+    err.textContent = msg || '';
+    err.hidden = !msg;
+    const input = $('#lock-form').key;
+    input.value = '';
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function openRegistry() {
+    if (!DEMO && !kv.get(KEY_STORE, 'session')) { showLock(); return; }
+    loadRegistry(false);
+  }
+
+  async function loadRegistry(force) {
+    $('#lock').hidden = true;
+    $('#registry').hidden = false;
+    $('#logout').hidden = DEMO;
+    if (reg.loaded && !force) { renderRegistry(); return; }
+    if (reg.loading) return;
+    reg.loading = true;
+    $('#reg-table').innerHTML = '<tbody><tr><td class="empty">กำลังโหลดข้อมูล…</td></tr></tbody>';
+    try {
+      const r = await api.list(kv.get(KEY_STORE, 'session'));
+      buildRegistry(r);
+      reg.loaded = true;
+      renderRegistry();
+    } catch (err) {
+      if (err.code === 401) {
+        kv.del(KEY_STORE, 'session');
+        showLock('รหัสเจ้าหน้าที่ไม่ถูกต้อง');
+      } else {
+        $('#reg-table').innerHTML = `<tbody><tr><td class="empty">${esc(err.message)}</td></tr></tbody>`;
+        toast(err.message, true);
+      }
+    } finally {
+      reg.loading = false;
+    }
+  }
+
+  function buildRegistry(r) {
+    const cur = curYearBE();
+    reg.apps = (r.applications || []).map((a) => Object.assign({}, a, { app_id: String(a.app_id), year_be: Number(a.year_be) }));
+    reg.appsById = {};
+    reg.apps.forEach((a) => { reg.appsById[a.app_id] = a; });
+    reg.membersByApp = {};
+    const rows = (r.members || []).map((m) => {
+      const a = reg.appsById[String(m.app_id)] || {};
+      const row = Object.assign({}, m, {
+        app_id: String(m.app_id), seq: Number(m.seq), year_be: Number(m.year_be || a.year_be),
+        applicant_name: m.applicant_name || a.applicant_name || '', department: m.department || a.department || '',
+        applicant_type: a.applicant_type || '', form_date: a.form_date || '',
+      });
+      row.pk = norm(row.full_name) + '|' + norm(row.applicant_name);
+      (reg.membersByApp[row.app_id] = reg.membersByApp[row.app_id] || []).push(row);
+      return row;
+    });
+    const latest = {};
+    rows.forEach((x) => { latest[x.pk] = Math.max(latest[x.pk] || 0, x.year_be); });
+    rows.forEach((x) => {
+      x.status = x.year_be >= cur ? 'active' : (x.year_be === latest[x.pk] ? 'renew' : 'history');
+    });
+    rows.sort((a, b) => b.year_be - a.year_be || (a.app_id < b.app_id ? 1 : a.app_id > b.app_id ? -1 : 0) || a.seq - b.seq);
+    reg.rows = rows;
+
+    const keepYear = $('#f-year').value;
+    const keepDept = $('#f-dept').value;
+    const years = Array.from(new Set(rows.map((x) => x.year_be))).sort((a, b) => b - a);
+    const depts = Array.from(new Set(rows.map((x) => x.department).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'th'));
+    $('#f-year').innerHTML = '<option value="">ทุกปี</option>' + years.map((y) => `<option value="${y}">ปี ${y}</option>`).join('');
+    $('#f-dept').innerHTML = '<option value="">ทุกสังกัด</option>' + depts.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    if (years.includes(Number(keepYear))) $('#f-year').value = keepYear;
+    if (depts.includes(keepDept)) $('#f-dept').value = keepDept;
+  }
+
+  const STATUS = { active: ['active', 'ใช้งานปีนี้'], renew: ['renew', 'ต้องต่ออายุ'], history: ['history', 'ประวัติ'] };
+
+  function filteredRows() {
+    const q = norm($('#f-q').value);
+    const year = $('#f-year').value;
+    const dept = $('#f-dept').value;
+    const status = $('#f-status').value;
+    return reg.rows.filter((x) =>
+      (!year || String(x.year_be) === year) &&
+      (!dept || x.department === dept) &&
+      (status === 'all' || x.status === status) &&
+      (!q || norm([x.full_name, x.applicant_name, x.department, x.app_id, x.relationship].join(' ')).includes(q)));
+  }
+
+  function renderRegistry() {
+    const cur = curYearBE();
+    const curRows = reg.rows.filter((x) => x.year_be === cur);
+    const curApps = reg.apps.filter((a) => a.year_be === cur);
+    const renewCount = reg.rows.filter((x) => x.status === 'renew').length;
+    const newCount = curRows.filter((x) => x.membership === 'สมัครใหม่').length;
+    const fees = curApps.reduce((s, a) => s + Number(a.total_fee || 0), 0);
+    $('#tiles').innerHTML = `
+      <div class="tile"><div class="tile-label">สมาชิกปี ${cur}</div><div class="tile-value">${curRows.length}</div><div class="tile-sub">จาก ${curApps.length} ใบสมัคร</div></div>
+      <div class="tile"><div class="tile-label">สมัครใหม่ / ต่ออายุ</div><div class="tile-value">${newCount} / ${curRows.length - newCount}</div><div class="tile-sub">ปี ${cur}</div></div>
+      <div class="tile${renewCount ? ' warn' : ''}"><div class="tile-label">ต้องต่ออายุ</div><div class="tile-value">${renewCount}</div><div class="tile-sub">สมาชิกปีก่อนที่ยังไม่ต่อ</div></div>
+      <div class="tile"><div class="tile-label">ค่าธรรมเนียมปี ${cur}</div><div class="tile-value">${baht(fees)}</div><div class="tile-sub">บาท (ค่าสมาชิก + ค่าบัตร)</div></div>`;
+
+    const rows = filteredRows();
+    const LIMIT = 500;
+    const body = rows.slice(0, LIMIT).map((x) => {
+      const [cls, label] = STATUS[x.status];
+      const canRenew = x.year_be < cur;
+      return `<tr>
+        <td><span class="app-chip">${esc(x.app_id)}</span><span class="sub">ลำดับ ${x.seq} · ${esc(thShort(x.form_date))}</span></td>
+        <td><strong>${esc(x.full_name)}</strong><span class="sub">${esc(x.relationship)} · ${esc(x.age)} ปี</span></td>
+        <td class="addr">${esc(x.address)}</td>
+        <td class="nowrap">${esc(x.membership)}</td>
+        <td>${esc(x.applicant_name)}<span class="sub">${esc(x.applicant_type)} · ${esc(x.department)}</span></td>
+        <td><span class="badge ${cls}">${label}</span></td>
+        <td><div class="row-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-act="print" data-app="${esc(x.app_id)}">พิมพ์</button>
+          ${canRenew ? `<button type="button" class="btn btn-ghost btn-sm" data-act="renew" data-app="${esc(x.app_id)}">ต่ออายุ</button>` : ''}
+        </div></td></tr>`;
+    }).join('');
+    $('#reg-table').innerHTML = `
+      <thead><tr><th>เลขที่ใบสมัคร</th><th>สมาชิก</th><th>ที่อยู่ / ที่ทำงาน</th><th>สมาชิกภาพ</th><th>ผู้ยื่น</th><th>สถานะ</th><th></th></tr></thead>
+      <tbody>${body || `<tr><td class="empty" colspan="7">${reg.rows.length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีข้อมูลสมาชิก'}</td></tr>`}</tbody>`;
+    $('#reg-count').textContent = `แสดง ${Math.min(rows.length, LIMIT).toLocaleString('th-TH')} จาก ${reg.rows.length.toLocaleString('th-TH')} รายการ` +
+      (rows.length > LIMIT ? ` (ใช้ตัวกรองเพื่อดูรายการที่เหลือ หรือส่งออก CSV)` : '');
+  }
+
+  function exportCsv() {
+    const rows = filteredRows();
+    if (!rows.length) { toast('ไม่มีข้อมูลให้ส่งออก', true); return; }
+    const head = ['เลขที่ใบสมัคร', 'ปี พ.ศ.', 'วันที่ยื่น', 'ลำดับ', 'ชื่อ - สกุลสมาชิก', 'อายุ', 'ที่อยู่ / ที่ทำงาน', 'ฐานะ',
+      'สมาชิกภาพ', 'ผู้ยื่น', 'ประเภทผู้ยื่น', 'สังกัด', 'สถานะ'];
+    const cell = (v) => {
+      let s = String(v == null ? '' : v);
+      if (/^[=+\-@]/.test(s)) s = "'" + s; // stop formula injection when opened in Excel
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [head].concat(rows.map((x) => [x.app_id, x.year_be, thShort(x.form_date), x.seq, x.full_name, x.age,
+      x.address, x.relationship, x.membership, x.applicant_name, x.applicant_type, x.department, STATUS[x.status][1]]));
+    const csv = '﻿' + lines.map((r) => r.map(cell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `member-registry-${todayISO()}.csv` });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function onRegistryClick(e) {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.dataset.app;
+    if (btn.dataset.act === 'print') {
+      const app = reg.appsById[id];
+      if (app) printApplication(app, reg.membersByApp[id] || []);
+    } else if (btn.dataset.act === 'renew') {
+      prefillRenewal(id);
+    }
+  }
+
+  // ================================================================== wire up
+  function init() {
+    $('#demo-banner').hidden = !DEMO;
+    buildStatic();
+    resetForm();
+
+    $$('.tab').forEach((t) => t.addEventListener('click', () => switchView(t.dataset.view)));
+
+    form.addEventListener('submit', onSubmit);
+    form.formDate.addEventListener('input', updateDateHint);
+    form.addEventListener('input', (e) => {
+      $('#form-error').hidden = true;
+      if (e.target === form.photoCount || e.target === form.docCount) e.target.dataset.touched = '1';
+      if (!e.target.closest('.member')) {
+        e.target.classList.remove('invalid');
+        const seg = e.target.closest('.seg, .check');
+        if (seg) seg.classList.remove('invalid');
+      }
+    });
+    form.addEventListener('change', (e) => {
+      if (e.target.name === 'purpose') {
+        // switching the overall purpose sets every member to the same membership type
+        const v = e.target.value;
+        state.members.forEach((m) => { m.membership = v; });
+        renderMembers();
+      }
+    });
+    $('#members').addEventListener('input', onMembersInput);
+    $('#members').addEventListener('change', onMembersInput);
+    $('#members').addEventListener('click', onMembersClick);
+    $('#add-member').addEventListener('click', addMember);
+    $('#reset-form').addEventListener('click', () => { if (confirmReset()) resetForm(); });
+    $('#new-form').addEventListener('click', startNewForm);
+    $('#print-saved').addEventListener('click', () => { if (lastSaved) printApplication(lastSaved.application, lastSaved.members); });
+
+    $('#lock-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const key = e.target.key.value.trim();
+      if (!key) return;
+      kv.set(KEY_STORE, key, 'session');
+      loadRegistry(true);
+    });
+    ['#f-q', '#f-year', '#f-dept', '#f-status'].forEach((s) => $(s).addEventListener('input', renderRegistry));
+    $('#refresh').addEventListener('click', () => loadRegistry(true));
+    $('#export').addEventListener('click', exportCsv);
+    $('#logout').addEventListener('click', () => {
+      kv.del(KEY_STORE, 'session');
+      reg.loaded = false;
+      reg.rows = [];
+      showLock();
+    });
+    $('#reg-table').addEventListener('click', onRegistryClick);
+
+    if (location.hash === '#registry') switchView('registry');
+  }
+
+  // Avoid a native confirm() dialog: reset only when the form is mostly empty, otherwise ask via a second click.
+  let resetArmed = 0;
+  function confirmReset() {
+    const d = collect();
+    const filled = d.applicantName || d.department || d.members.some((m) => m.fullName || m.address);
+    if (!filled) return true;
+    if (Date.now() - resetArmed < 4000) { resetArmed = 0; return true; }
+    resetArmed = Date.now();
+    toast('กด "ล้างฟอร์ม" อีกครั้งเพื่อยืนยัน');
+    return false;
+  }
+
+  init();
+})();
