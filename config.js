@@ -20,5 +20,5 @@ window.APP_CONFIG = {
   // สังกัด list lives in departments.js and ตำแหน่ง in positions.js — leave these empty to use them.
   DEPARTMENTS: [],
   POSITIONS: [],
-  RELATIONSHIPS: ["ญาติ", "บุคคลภายนอก"],
+  RELATIONSHIPS: ["คู่สมรส", "บุตร", "บิดา", "มารดา", "พี่น้อง", "ญาติ"],
 };
