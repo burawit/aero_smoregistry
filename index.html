@@ -66,6 +66,7 @@
               <fieldset class="field span-3">
                 <legend class="label">ประเภท</legend>
                 <div class="seg" id="applicant-type"></div>
+                <small class="hint warn" id="type-hint" hidden></small>
               </fieldset>
               <label class="field span-3">
                 <span class="label">สังกัด</span>
@@ -90,6 +91,7 @@
           <div class="card">
             <h2 class="card-title"><span class="step">3</span>รายละเอียดผู้เป็นสมาชิก <span class="pill"
                 id="member-count"></span></h2>
+            <div class="rules" id="member-rules"></div>
             <div id="members" class="members"></div>
             <button type="button" class="btn btn-ghost btn-add" id="add-member">+ เพิ่มสมาชิก</button>
           </div>
@@ -109,13 +111,12 @@
             <table class="fees" id="fees"></table>
           </div>
 
-          <div class="card">
-            <h2 class="card-title"><span class="step">5</span>คำรับรอง</h2>
+          <div class="card" id="cert-card" hidden>
+            <h2 class="card-title"><span class="step">5</span>คำรับรองของพนักงาน (เฉพาะบุคคลภายนอก)</h2>
             <p class="cert" id="cert-text"></p>
             <label class="check">
-              <input type="checkbox" name="agree" required>
-              <span>ข้าพเจ้าขอรับรองว่าข้อมูลข้างต้นเป็นความจริง
-                และผู้สมัครยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ</span>
+              <input type="checkbox" name="agree">
+              <span>ข้าพเจ้าเป็นพนักงานศูนย์ควบคุมการบินเชียงใหม่ และขอรับรองผู้สมัครประเภทบุคคลภายนอกตามข้อความข้างต้น</span>
             </label>
           </div>
 
@@ -169,6 +170,11 @@
               aria-label="ค้นหา">
             <select id="f-year" aria-label="ปี"></select>
             <select id="f-dept" aria-label="สังกัด"></select>
+            <select id="f-type" aria-label="ประเภทสมาชิก">
+              <option value="">ทุกประเภท</option>
+              <option value="ครอบครัวพนักงาน">ครอบครัวพนักงาน</option>
+              <option value="บุคคลภายนอก">บุคคลภายนอก</option>
+            </select>
             <select id="f-status" aria-label="สถานะ">
               <option value="all">ทุกสถานะ</option>
               <option value="active">ใช้งานปีนี้</option>
@@ -192,6 +198,7 @@
     <datalist id="dept-list"></datalist>
     <datalist id="pos-list"></datalist>
     <datalist id="rel-list"></datalist>
+    <datalist id="rel-out-list"></datalist>
   </div>
 
   <div id="print-root"></div>

@@ -2,7 +2,7 @@
 // Leave API_URL empty to run in demo mode (data is kept only in this browser).
 window.APP_CONFIG = {
   // Apps Script web-app URL ending in /exec (Deploy → Manage deployments)
-  API_URL: "https://script.google.com/macros/s/AKfycbzGsVNzFsgR7bw35QBRydoth3Vgp7ZufLYVTt-FV8YlFuwx5JTkpGnQfgg97mhlsmVv/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycbyGZdj50fG2aR3EsJAouN0d-odn_U3gc94R8WxV37YsOHO2CVSXpwmVxpxAfvlCTbLn/exec",
 
   // Fees — keep in sync with FEES in apps-script/Code.gs
   MEMBER_FEE: 100,          // บาท/คน/ปี
@@ -20,5 +20,5 @@ window.APP_CONFIG = {
   // สังกัด list lives in departments.js and ตำแหน่ง in positions.js — leave these empty to use them.
   DEPARTMENTS: [],
   POSITIONS: [],
-  RELATIONSHIPS: ["ตนเอง", "คู่สมรส", "บุตร", "บิดา", "มารดา", "พี่น้อง", "ญาติ"],
+  RELATIONSHIPS: ["ญาติ", "บุคคลภายนอก"],
 };
