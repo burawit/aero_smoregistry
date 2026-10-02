@@ -2,14 +2,14 @@
 // Leave API_URL empty to run in demo mode (data is kept only in this browser).
 window.APP_CONFIG = {
   // Apps Script web-app URL ending in /exec (Deploy → Manage deployments)
-  API_URL: "",
+  API_URL: "https://script.google.com/macros/s/AKfycbzGsVNzFsgR7bw35QBRydoth3Vgp7ZufLYVTt-FV8YlFuwx5JTkpGnQfgg97mhlsmVv/exec",
 
   // Fees — keep in sync with FEES in apps-script/Code.gs
   MEMBER_FEE: 100,          // บาท/คน/ปี
   CARD_FEE: 20,             // บาท/คน
   CARD_FEE_ON_RENEW: false, // false = card fee only for "สมัครใหม่"
 
-  MAX_MEMBERS: 6,
+  MAX_MEMBERS: 3,
 
   // Printed on the staff section of the form
   ADDRESSEE: "ผศข.บภ 2.",
