@@ -18,6 +18,34 @@
   const CERT_TEXT = 'ข้าพเจ้าขอรับรองว่าข้อความข้างต้นของผู้สมัครเป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้' +
     'ยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ ทุกประการ และจะไม่เรียกร้องค่าเสียหายใด ๆ ' +
     'หากเกิดอันตรายหรือบาดเจ็บขณะอยู่ในบริเวณบ้านพักรับรองหรือศูนย์กีฬาของ ' + CFG.COMPANY_NAME;
+  // สังกัด list: departments.js (window.APP_DEPARTMENTS, [code, name]) unless config.js sets DEPARTMENTS
+  const DEPTS = ((CFG.DEPARTMENTS && CFG.DEPARTMENTS.length) ? CFG.DEPARTMENTS : (window.APP_DEPARTMENTS || []))
+    .map((d) => (Array.isArray(d) ? { code: String(d[0] || '').trim(), name: String(d[1] || '').trim() } : { code: String(d || '').trim(), name: '' }))
+    .filter((d) => d.code)
+    .sort((a, b) => a.code.localeCompare(b.code, 'th'));
+  const deptLabel = (d) => (d.name ? `${d.code} ${d.name}` : d.code);
+  const matchKey = (s) => String(s || '').replace(/[\s.]/g, '').toLowerCase(); // "ศช.บภ 2." == "ศชบภ2"
+  const DEPT_INDEX = new Map();
+  DEPTS.forEach((d) => [d.code, d.name, deptLabel(d)].forEach((k) => { if (k) DEPT_INDEX.set(matchKey(k), deptLabel(d)); }));
+  // Typing a code or a full name alone is expanded to the canonical "code name", so the registry groups cleanly.
+  const canonicalDept = (v) => {
+    const t = String(v || '').replace(/\s+/g, ' ').trim();
+    return DEPT_INDEX.get(matchKey(t)) || t;
+  };
+  const isKnownDept = (v) => DEPT_INDEX.has(matchKey(v));
+
+  // ตำแหน่ง list: positions.js (window.APP_POSITIONS) unless config.js sets POSITIONS
+  const POSITIONS = ((CFG.POSITIONS && CFG.POSITIONS.length) ? CFG.POSITIONS : (window.APP_POSITIONS || []))
+    .map((p) => String(p || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, 'th'));
+  const POS_INDEX = new Map(POSITIONS.map((p) => [matchKey(p), p]));
+  const canonicalPosition = (v) => {
+    const t = String(v || '').replace(/\s+/g, ' ').trim();
+    return POS_INDEX.get(matchKey(t)) || t;
+  };
+  const isKnownPosition = (v) => POS_INDEX.has(matchKey(v));
+
   const KEY_STORE = 'mr-staff-key';
   const DEMO_STORE = 'mr-demo-db';
 
@@ -160,7 +188,8 @@
     $('#applicant-type').innerHTML = radios('applicantType', APPLICANT_TYPES.map((t) => [t, t]), 'พนักงาน');
     $('#purpose').innerHTML = radios('purpose', PURPOSES, 'สมัครใหม่');
     $('#cert-text').textContent = CERT_TEXT;
-    $('#dept-list').innerHTML = (CFG.DEPARTMENTS || []).map((d) => `<option value="${esc(d)}">`).join('');
+    $('#dept-list').innerHTML = DEPTS.map((d) => `<option value="${esc(deptLabel(d))}">`).join('');
+    $('#pos-list').innerHTML = POSITIONS.map((p) => `<option value="${esc(p)}">`).join('');
     $('#rel-list').innerHTML = (CFG.RELATIONSHIPS || []).map((d) => `<option value="${esc(d)}">`).join('');
   }
 
@@ -177,6 +206,8 @@
     $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
     renderMembers();
     updateDateHint();
+    updateDeptHint();
+    updatePosHint();
   }
 
   function renderMembers() {
@@ -209,6 +240,18 @@
     $('#member-count').textContent = `${state.members.length} / ${max} คน`;
     updateCountsAndFees();
   }
+
+  function setListHint(input, hint, hasList, isKnown, emptyMsg, unknownMsg) {
+    const v = input.value.trim();
+    if (!hasList) { hint.textContent = ''; return; }
+    const unknown = !!v && !isKnown(v);
+    hint.textContent = !v ? emptyMsg : (unknown ? unknownMsg : '');
+    hint.classList.toggle('warn', unknown);
+  }
+  const updateDeptHint = () => setListHint(form.department, $('#dept-hint'), DEPTS.length, isKnownDept,
+    'พิมพ์รหัสหรือชื่อหน่วยงาน แล้วเลือกจากรายการ', 'ไม่พบในรายการหน่วยงาน — ตรวจสอบการสะกด (ยังบันทึกได้)');
+  const updatePosHint = () => setListHint(form.position, $('#pos-hint'), POSITIONS.length, isKnownPosition,
+    'พิมพ์บางส่วนของชื่อตำแหน่ง แล้วเลือกจากรายการ', 'ไม่พบในรายการตำแหน่ง — ตรวจสอบการสะกด (ยังบันทึกได้)');
 
   function updateDateHint() {
     $('#date-th').textContent = thLong(form.formDate.value);
@@ -267,8 +310,8 @@
       formDate: form.formDate.value,
       applicantName: form.applicantName.value.trim(),
       applicantType: checked('applicantType'),
-      department: form.department.value.trim(),
-      position: form.position.value.trim(),
+      department: canonicalDept(form.department.value),
+      position: canonicalPosition(form.position.value),
       purpose: checked('purpose'),
       photoCount: int(form.photoCount.value),
       docCount: int(form.docCount.value),
@@ -368,8 +411,10 @@
     form.applicantName.value = app.applicant_name || '';
     const t = form.querySelector(`input[name=applicantType][value="${app.applicant_type}"]`);
     if (t) t.checked = true;
-    form.department.value = app.department || '';
-    form.position.value = app.position || '';
+    form.department.value = canonicalDept(app.department);
+    updateDeptHint();
+    form.position.value = canonicalPosition(app.position);
+    updatePosHint();
     form.querySelector('input[name=purpose][value="ต่ออายุ"]').checked = true;
     state.members = ms.map((m) => ({
       fullName: m.full_name, age: m.age === '' ? '' : Number(m.age) + diff, address: m.address,
@@ -478,9 +523,27 @@
     return page1 + page2;
   }
 
+  // Shrink any filled value that is wider than its dotted line (e.g. a long สังกัด name).
+  function fitPrintFields(root) {
+    root.style.cssText = 'display:block;position:absolute;left:-10000px;top:0;width:182mm'; // A4 minus print margins
+    root.querySelectorAll('.pf-fill').forEach((el) => {
+      let size = 11;
+      while (el.scrollWidth > el.clientWidth + 1 && size > 8) {
+        size -= 0.5;
+        el.style.fontSize = size + 'pt';
+      }
+      if (el.scrollWidth > el.clientWidth + 1) { // still too long (e.g. a long ตำแหน่ง): wrap onto 2 lines
+        el.classList.add('wrap');
+        el.style.fontSize = '9.5pt';
+      }
+    });
+    root.style.cssText = '';
+  }
+
   function printApplication(app, members) {
-    $('#print-root').innerHTML = renderPrint(app, members);
-    const go = () => window.print();
+    const root = $('#print-root');
+    root.innerHTML = renderPrint(app, members);
+    const go = () => { fitPrintFields(root); window.print(); };
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(go); else go();
   }
 
@@ -540,7 +603,7 @@
       const row = Object.assign({}, m, {
         app_id: String(m.app_id), seq: Number(m.seq), year_be: Number(m.year_be || a.year_be),
         applicant_name: m.applicant_name || a.applicant_name || '', department: m.department || a.department || '',
-        applicant_type: a.applicant_type || '', form_date: a.form_date || '',
+        applicant_type: a.applicant_type || '', form_date: a.form_date || '', position: a.position || '',
       });
       row.pk = norm(row.full_name) + '|' + norm(row.applicant_name);
       (reg.membersByApp[row.app_id] = reg.membersByApp[row.app_id] || []).push(row);
@@ -619,14 +682,14 @@
     const rows = filteredRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ส่งออก', true); return; }
     const head = ['เลขที่ใบสมัคร', 'ปี พ.ศ.', 'วันที่ยื่น', 'ลำดับ', 'ชื่อ - สกุลสมาชิก', 'อายุ', 'ที่อยู่ / ที่ทำงาน', 'ฐานะ',
-      'สมาชิกภาพ', 'ผู้ยื่น', 'ประเภทผู้ยื่น', 'สังกัด', 'สถานะ'];
+      'สมาชิกภาพ', 'ผู้ยื่น', 'ประเภทผู้ยื่น', 'สังกัด', 'ตำแหน่งผู้ยื่น', 'สถานะ'];
     const cell = (v) => {
       let s = String(v == null ? '' : v);
       if (/^[=+\-@]/.test(s)) s = "'" + s; // stop formula injection when opened in Excel
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [head].concat(rows.map((x) => [x.app_id, x.year_be, thShort(x.form_date), x.seq, x.full_name, x.age,
-      x.address, x.relationship, x.membership, x.applicant_name, x.applicant_type, x.department, STATUS[x.status][1]]));
+    x.address, x.relationship, x.membership, x.applicant_name, x.applicant_type, x.department, x.position, STATUS[x.status][1]]));
     const csv = '﻿' + lines.map((r) => r.map(cell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: `member-registry-${todayISO()}.csv` });
@@ -658,6 +721,14 @@
 
     form.addEventListener('submit', onSubmit);
     form.formDate.addEventListener('input', updateDateHint);
+    form.department.addEventListener('change', () => {
+      form.department.value = canonicalDept(form.department.value);
+      updateDeptHint();
+    });
+    form.position.addEventListener('change', () => {
+      form.position.value = canonicalPosition(form.position.value);
+      updatePosHint();
+    });
     form.addEventListener('input', (e) => {
       $('#form-error').hidden = true;
       if (e.target === form.photoCount || e.target === form.docCount) e.target.dataset.touched = '1';

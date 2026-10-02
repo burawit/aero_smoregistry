@@ -16,7 +16,9 @@ window.APP_CONFIG = {
   DIRECTOR_TITLE: "ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่",
   COMPANY_NAME: "บริษัท วิทยุการบินแห่งประเทศไทย จำกัด",
 
-  // Suggestions shown while typing (optional)
+  // Suggestions shown while typing.
+  // สังกัด list lives in departments.js and ตำแหน่ง in positions.js — leave these empty to use them.
   DEPARTMENTS: [],
+  POSITIONS: [],
   RELATIONSHIPS: ["ตนเอง", "คู่สมรส", "บุตร", "บิดา", "มารดา", "พี่น้อง", "ญาติ"],
 };
