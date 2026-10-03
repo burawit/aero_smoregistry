@@ -45,7 +45,7 @@
       <section id="view-form" class="view" aria-labelledby="form-title">
         <div class="page-head">
           <h1 id="form-title">ใบสมัครสมาชิกวิทยุการบิน</h1>
-          <p>กรอกข้อมูลผู้ยื่นและผู้เป็นสมาชิก (สูงสุด 6 คน) บันทึก แล้วพิมพ์ใบสมัครเพื่อลงลายมือชื่อและแนบเอกสาร</p>
+          <p id="form-intro">กรอกข้อมูลผู้ยื่นและผู้เป็นสมาชิก บันทึก แล้วพิมพ์ใบสมัครเพื่อลงลายมือชื่อ</p>
         </div>
 
         <div id="renew-note" class="note" hidden></div>
@@ -92,13 +92,7 @@
           </div>
 
           <div class="card">
-            <h2 class="card-title"><span class="step">4</span>รูปถ่ายและค่าธรรมเนียม</h2>
-            <div class="grid grid-2">
-              <label class="field">
-                <span class="label">รูปถ่ายขนาด 1 นิ้ว คนละ 2 รูป (ใบ)</span>
-                <input type="number" name="photoCount" min="0" max="100" inputmode="numeric">
-              </label>
-            </div>
+            <h2 class="card-title"><span class="step">4</span>ค่าธรรมเนียม</h2>
             <table class="fees" id="fees"></table>
           </div>
 
@@ -128,7 +122,7 @@
           <h2>บันทึกใบสมัครแล้ว</h2>
           <p>เลขที่ใบสมัคร <strong class="app-no" id="success-id"></strong></p>
           <p class="muted" id="success-summary"></p>
-          <p class="muted">พิมพ์ใบสมัคร ลงลายมือชื่อ แล้วส่งพร้อมรูปถ่าย สำเนาเอกสาร และค่าธรรมเนียมให้เจ้าหน้าที่</p>
+          <p class="muted" id="success-next">พิมพ์ใบสมัคร ลงลายมือชื่อ แล้วส่งพร้อมค่าธรรมเนียมให้เจ้าหน้าที่ (รูปถ่ายแนบในระบบแล้ว)</p>
           <div class="form-actions center">
             <button type="button" class="btn btn-ghost" id="new-form">กรอกใบใหม่</button>
             <button type="button" class="btn btn-primary" id="print-saved">พิมพ์ใบสมัคร</button>
@@ -140,7 +134,7 @@
       <section id="view-registry" class="view" aria-labelledby="reg-title" hidden>
         <div class="page-head">
           <h1 id="reg-title">ทะเบียนสมาชิก</h1>
-          <p>สำหรับเจ้าหน้าที่ — ค้นหา ตรวจสอบรายชื่อที่ต้องต่ออายุ พิมพ์ใบสมัคร และส่งออกข้อมูล</p>
+          <p>สำหรับเจ้าหน้าที่ — ค้นหา ตรวจสอบรายชื่อที่ต้องต่ออายุ เพิ่มรูปถ่าย พิมพ์ใบสมัครและบัตรสมาชิก และส่งออกข้อมูล</p>
         </div>
 
         <div id="lock" class="card lock" hidden>
@@ -172,6 +166,7 @@
               <option value="renew">ต้องต่ออายุ</option>
             </select>
             <div class="toolbar-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="print-cards" disabled>พิมพ์บัตร</button>
               <button type="button" class="btn btn-ghost btn-sm" id="refresh">รีเฟรช</button>
               <button type="button" class="btn btn-ghost btn-sm" id="export">ส่งออก CSV</button>
               <button type="button" class="btn btn-ghost btn-sm" id="logout" hidden>ออกจากระบบ</button>
@@ -181,6 +176,8 @@
             <table class="reg-table" id="reg-table"></table>
           </div>
           <p class="muted small" id="reg-count"></p>
+          <p class="muted small">ติ๊กเลือกสมาชิกที่ยังใช้งานปีนี้ แล้วกด "พิมพ์บัตร" — พิมพ์บนกระดาษ A4 แผ่นละ 10 ใบ แบบสองหน้า
+            (กลับด้านยาว) ตัดตามเส้นแล้วเคลือบ · แตะรูปเพื่อเพิ่มหรือเปลี่ยนรูปถ่าย</p>
         </div>
       </section>
     </main>
@@ -189,6 +186,7 @@
   </div>
 
   <div id="print-root"></div>
+  <input type="file" id="photo-input" accept="image/*" hidden>
 
   <script src="config.js"></script>
   <script src="departments.js"></script>

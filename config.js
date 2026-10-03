@@ -11,6 +11,13 @@ window.APP_CONFIG = {
 
   MAX_MEMBERS: 12,          // rows on the form: ครอบครัว 1–9 + บุคคลภายนอก 10–12 (keep in sync with Code.gs)
 
+  // ปีสมาชิก = ปีงบประมาณ 1 ต.ค.–30 ก.ย. → บัตรหมดอายุ 30 ก.ย. (1 = ปีปฏิทิน). Keep in sync with MEMBERSHIP_YEAR in Code.gs
+  MEMBERSHIP_YEAR_START_MONTH: 10,
+
+  // บัตรสมาชิก (optional)
+  // CARD_LOGO: "logo.png",                 // รูปโลโก้ในโฟลเดอร์นี้ แสดงที่หัวบัตร
+  // CARD_CONTACT: "โทร 0 5320 0000",        // ด้านหลังบัตร ต่อท้าย "หากพบบัตรนี้ โปรดส่งคืน…"
+
   // Printed on the staff section of the form
   ADDRESSEE: "ผศช.บภ 2.",
   DIRECTOR_TITLE: "ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่",

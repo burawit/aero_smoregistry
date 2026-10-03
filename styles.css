@@ -403,6 +403,210 @@ textarea.invalid,
   color: var(--primary);
 }
 
+/* a member type whose rows are used up (บุคคลภายนอก ≤ 3, ครอบครัว ≤ 9) */
+.seg.cards label.is-full {
+  cursor: not-allowed;
+  background: var(--bg);
+  opacity: .6;
+}
+
+.full-tag {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+/* "ใช้ที่อยู่เดียวกับ คนที่ 1" */
+.addr-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: -6px;
+}
+
+.addr-copy:empty {
+  display: none;
+}
+
+.addr-copy-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chip-btn {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 13.5px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-btn:hover {
+  background: var(--primary-soft);
+}
+
+/* photo for the member card */
+.opt-note {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.photo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.photo-box {
+  flex: none;
+  width: 72px;
+  height: 96px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: #b8c1cf;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.photo-box svg {
+  width: 44px;
+  height: 44px;
+}
+
+.photo-box.has-photo {
+  border-style: solid;
+  border-color: var(--line);
+}
+
+.photo-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.photo-actions .hint {
+  flex-basis: 100%;
+}
+
+.req-note {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.photo-box.invalid {
+  border-color: var(--danger);
+  background: #fdecea;
+  color: #e5a9a3;
+}
+
+.photo-field.is-renew .photo-box {
+  width: 54px;
+  height: 72px;
+}
+
+.photo-field.is-renew .photo-box svg {
+  width: 32px;
+  height: 32px;
+}
+
+/* registry: pick for card printing + photo thumbnail */
+.reg-table .pick-cell {
+  width: 1%;
+  padding-right: 4px;
+  vertical-align: middle;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pick input,
+#pick-all {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.thumb {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: #b8c1cf;
+  overflow: hidden;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumb svg {
+  width: 24px;
+  height: 24px;
+}
+
+.thumb.no-photo {
+  border-style: dashed;
+  border-color: #e0b36b;
+  background: var(--warn-soft);
+}
+
+.thumb .plus {
+  position: absolute;
+  right: 1px;
+  bottom: -2px;
+  font-weight: 700;
+  color: var(--warn);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.thumb.busy {
+  opacity: .45;
+  pointer-events: none;
+}
+
+.reg-table tr.picked td {
+  background: var(--primary-soft);
+}
+
 /* ฐานะ: tap chips instead of a text box */
 .seg.chips label {
   position: relative;
@@ -776,7 +980,7 @@ textarea.invalid,
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -985,6 +1189,10 @@ textarea.invalid,
 @media (max-width: 760px) {
   .tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiles .tile:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 }
 
@@ -1368,4 +1576,338 @@ textarea.invalid,
   justify-content: space-between;
   font-size: 9pt;
   color: #666;
+}
+/* =====================================================================
+   PRINT — member cards: A4, 2 × 5 cards of 85.6 × 54 mm, fronts then backs
+   (the page margin is set to 0 by app.js while printing cards)
+   ===================================================================== */
+.cd-print {
+  font-family: "Sarabun", "TH Sarabun New", sans-serif;
+  color: #111827;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cd-sheet {
+  position: relative;
+  width: 210mm;
+  height: 296.5mm;
+  overflow: hidden;
+  break-after: page;
+  page-break-after: always;
+}
+
+.cd-sheet:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.cd-grid {
+  position: absolute;
+  left: 19.4mm;
+  top: 13.5mm;
+  width: 171.2mm;
+  height: 270mm;
+  display: grid;
+  grid-template-columns: repeat(2, 85.6mm);
+  grid-template-rows: repeat(5, 54mm);
+}
+
+.cd-sheet-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4mm;
+  text-align: center;
+  font-size: 7pt;
+  color: #9ca3af;
+}
+
+/* crop marks outside the grid, at every cut line */
+.cm {
+  position: absolute;
+}
+
+.cm.v {
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+
+.cm.h {
+  left: 0;
+  right: 0;
+  height: 0;
+}
+
+.cm::before,
+.cm::after {
+  content: "";
+  position: absolute;
+  border: 0 solid #6b7280;
+}
+
+.cm.v::before,
+.cm.v::after {
+  height: 5mm;
+  border-left-width: .2mm;
+}
+
+.cm.v::before {
+  top: -6.5mm;
+}
+
+.cm.v::after {
+  bottom: -6.5mm;
+}
+
+.cm.h::before,
+.cm.h::after {
+  width: 5mm;
+  border-top-width: .2mm;
+}
+
+.cm.h::before {
+  left: -6.5mm;
+}
+
+.cm.h::after {
+  right: -6.5mm;
+}
+
+.cd {
+  position: relative;
+  width: 85.6mm;
+  height: 54mm;
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.cd-front {
+  box-shadow: inset 0 0 0 .15mm #c9ced6;
+}
+
+.cd-head {
+  display: flex;
+  align-items: center;
+  gap: 2mm;
+  height: 10.5mm;
+  padding: 0 3.5mm;
+  background: #1d3a6e;
+  color: #fff;
+  flex: none;
+}
+
+.cd-logo {
+  height: 7mm;
+  width: auto;
+}
+
+.cd-title {
+  font-size: 9.5pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cd-org {
+  font-size: 6.5pt;
+  line-height: 1.25;
+  opacity: .9;
+}
+
+.cd-type {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 5mm;
+  padding: 0 3.5mm;
+  color: #fff;
+  font-size: 7pt;
+  font-weight: 700;
+  flex: none;
+}
+
+.t-fam .cd-type {
+  background: #1971c2;
+}
+
+.t-out .cd-type {
+  background: #e8590c;
+}
+
+.cd-no {
+  font-weight: 600;
+  letter-spacing: .03em;
+}
+
+.cd-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 3mm;
+  padding: 2.4mm 3.5mm 2.2mm;
+}
+
+.cd-photo {
+  flex: none;
+  width: 21mm;
+  height: 28mm;
+  border: .2mm solid #b9c0cc;
+  background: #f3f5f9;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.cd-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cd-nophoto {
+  font-size: 6pt;
+  color: #8a93a3;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.cd-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-fit {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cd-name {
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: .6mm;
+}
+
+.cd-row {
+  display: flex;
+  gap: 1.2mm;
+  font-size: 8pt;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.cd-k {
+  flex: none;
+  width: 12mm;
+  color: #6b7280;
+  font-size: 6.8pt;
+}
+
+.cd-v {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-dates {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 2mm;
+  font-size: 7.4pt;
+  border-top: .2mm solid #e1e5ec;
+  padding-top: .7mm;
+}
+
+.cd-dates .cd-k {
+  width: auto;
+  margin-right: 1mm;
+}
+
+.cd-exp {
+  font-weight: 700;
+  color: #b42318;
+}
+
+.cd-exp .cd-k {
+  font-weight: 400;
+}
+
+.cd-back {
+  padding: 4.2mm 4.5mm 2.6mm;
+}
+
+.cd-back::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2.2mm;
+}
+
+.t-fam.cd-back::before {
+  background: #1971c2;
+}
+
+.t-out.cd-back::before {
+  background: #e8590c;
+}
+
+.cd-back-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 2mm;
+}
+
+.cd-back-title {
+  font-size: 9pt;
+  font-weight: 700;
+  flex: none;
+}
+
+.cd-back-id {
+  font-size: 6.6pt;
+  color: #4b5563;
+  min-width: 0;
+  text-align: right;
+}
+
+.cd-rules {
+  margin: .6mm 0 0;
+  padding-left: 3.6mm;
+  font-size: 7.3pt;
+  line-height: 1.42;
+}
+
+.cd-sign {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 6.6pt;
+  color: #4b5563;
+}
+
+.cd-line {
+  width: 36mm;
+  height: 4.5mm;
+  border-bottom: .2mm dotted #6b7280;
+  margin-bottom: .4mm;
+}
+
+.cd-return {
+  margin-top: 1.2mm;
+  padding-top: .7mm;
+  border-top: .2mm solid #e1e5ec;
+  font-size: 6.6pt;
+  color: #4b5563;
+  text-align: center;
 }

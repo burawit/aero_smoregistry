@@ -15,6 +15,15 @@
     MAX_OUTSIDERS: 3,                      // บุคคลภายนอกที่พนักงาน 1 ท่านรับรองได้
     CERTIFIER_UNIT: 'ศูนย์ควบคุมการบินเชียงใหม่',
     OUTSIDER_RELATIONSHIPS: ['เพื่อน', 'เพื่อนร่วมงาน', 'คนรู้จัก'],
+    // ปีสมาชิก = ปีงบประมาณ 1 ต.ค.–30 ก.ย. (บัตรหมดอายุ 30 ก.ย.); 1 = ปีปฏิทิน. Keep in sync with MEMBERSHIP_YEAR in Code.gs
+    MEMBERSHIP_YEAR_START_MONTH: 10,
+    // บัตรสมาชิก
+    CARD_TITLE: 'บัตรสมาชิกสถานที่การกีฬา',
+    CARD_LOGO: '',                         // optional image in the repo, e.g. "logo.png"
+    CARD_CONTACT: '',                      // optional, e.g. "โทร 0 5320 0000"
+    FAMILY_RIGHTS: 'ใช้ได้ทุกสถานที่การกีฬา',
+    OUTSIDER_RIGHTS: 'สนามเทนนิส · สนามแบดมินตัน',
+    OUTSIDER_HOURS: 'ทุกวัน ยกเว้นวันอาทิตย์ 15.30–20.30 น.',
   }, window.APP_CONFIG || {});
   const DEMO = !CFG.API_URL;
 
@@ -22,6 +31,7 @@
   const PURPOSES = [['สมัครใหม่', 'สมัครเข้าเป็นสมาชิกใหม่'], ['ต่ออายุ', 'ต่ออายุสมาชิก']];
   const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const TH_MONTHS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   // Member types (ระเบียบ ข้อ ๖). ประเภท ๑ (พนักงาน/ลูกจ้าง/เกษียณ) is a member by status and is not listed.
   const FAMILY = 'ครอบครัวพนักงาน';
   const OUTSIDER = 'บุคคลภายนอก';
@@ -87,9 +97,19 @@
   const pad = (n) => String(n).padStart(2, '0');
   const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   const parts = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? { y: +m[1], m: +m[2], d: +m[3] } : null; };
-  const curYearBE = () => new Date().getFullYear() + 543;
   const thLong = (iso) => { const p = parts(iso); return p ? `${p.d} ${TH_MONTHS[p.m - 1]} พ.ศ. ${p.y + 543}` : ''; };
   const thShort = (iso) => { const p = parts(iso); return p ? `${p.d}/${p.m}/${p.y + 543}` : ''; };
+  const thMid = (iso) => { const p = parts(iso); return p ? `${p.d} ${TH_MONTHS_SHORT[p.m - 1]} ${p.y + 543}` : ''; };
+  // ปีสมาชิก (พ.ศ.): with a ปีงบประมาณ (start month 10) a date in ต.ค.–ธ.ค. belongs to the next year — same rule as Code.gs
+  const YEAR_START = Math.min(12, Math.max(1, Number(CFG.MEMBERSHIP_YEAR_START_MONTH) || 1));
+  const memberYear = (iso) => { const p = parts(iso); return p ? p.y + 543 + (YEAR_START > 1 && p.m >= YEAR_START ? 1 : 0) : 0; };
+  const curYearBE = () => memberYear(todayISO());
+  const yearLabel = (y) => (YEAR_START === 1 ? `ปี ${y}` : `ปีงบ ${y}`);
+  const yearEndISO = (yearBE) => { // last day of the membership year = card expiry (30 ก.ย. for ปีงบประมาณ)
+    const y = yearBE - 543;
+    const m = YEAR_START === 1 ? 12 : YEAR_START - 1;
+    return `${y}-${pad(m)}-${pad(new Date(y, m, 0).getDate())}`;
+  };
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
   function store(kind) {
@@ -168,17 +188,23 @@
   // Demo backend: same shapes as Code.gs, stored in this browser only.
   const demo = (() => {
     let mem = null;
-    const empty = () => ({ applications: [], members: [], seq: {} });
+    const empty = () => ({ applications: [], members: [], seq: {}, photos: {} });
     const load = () => {
       if (mem) return mem;
       try { mem = JSON.parse(kv.get(DEMO_STORE)) || empty(); } catch (e) { mem = empty(); }
+      mem.photos = mem.photos || {};
       return mem;
     };
-    const save = (db) => { mem = db; kv.set(DEMO_STORE, JSON.stringify(db)); };
+    const save = (db) => {
+      mem = db;
+      try { window.localStorage.setItem(DEMO_STORE, JSON.stringify(db)); } catch (e) {
+        throw new Error('พื้นที่เก็บข้อมูลของเบราว์เซอร์เต็ม (โหมดทดลองเก็บรูปไว้ในเบราว์เซอร์)');
+      }
+    };
     return {
       submit(d) {
         const db = load();
-        const yearBE = parts(d.formDate).y + 543;
+        const yearBE = memberYear(d.formDate);
         const outs = d.members.filter(isOutsider);
         const ruleErrs = countRuleErrors(d.members.length - outs.length, outs.length);
         if (ruleErrs.length) throw new Error(ruleErrs[0]);
@@ -188,7 +214,7 @@
             key(r.applicant_name) === key(d.applicantName)).map((r) => key(r.full_name)));
           const total = new Set([...already, ...outs.map((m) => key(m.fullName))]);
           if (total.size > CFG.MAX_OUTSIDERS) {
-            throw new Error(`พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อปี — ปี ${yearBE} ` +
+            throw new Error(`พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อปี — ${yearLabel(yearBE)} ` +
               `ท่านรับรองไปแล้ว ${already.size} คน (รับรองเพิ่มได้อีก ${Math.max(0, CFG.MAX_OUTSIDERS - already.size)} คน)`);
           }
         }
@@ -196,11 +222,16 @@
         const appId = `${yearBE}-${String(db.seq[yearBE]).padStart(4, '0')}`;
         const f = computeFees(d.members);
         const createdAt = new Date().toISOString();
+        const key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+        const reused = d.members.map((m) => (m.photo || m.membership !== 'ต่ออายุ' ? null
+          : db.members.slice().reverse().find((r) => r.photo_id && key(r.full_name) === key(m.fullName) &&
+            key(r.applicant_name) === key(d.applicantName)) || null));
         const application = {
           app_id: appId, year_be: yearBE, form_date: d.formDate, applicant_name: d.applicantName,
           applicant_type: d.applicantType, department: d.department, position: d.position, purpose: d.purpose,
           member_count: f.count, family_count: f.familyCount, outsider_count: f.outsiderCount,
-          new_count: f.newCount, renew_count: f.renewCount, photo_count: d.photoCount,
+          new_count: f.newCount, renew_count: f.renewCount,
+          photo_count: d.members.filter((m, i) => m.photo || reused[i]).length,
           member_fee: f.memberFee, card_fee: f.cardFee, facility_fee: f.facilityFee,
           total_fee: f.total, renewed_from: d.renewedFrom || '', created_at: createdAt,
         };
@@ -209,23 +240,123 @@
           app_id: appId, seq: rowNo[i], full_name: m.fullName, age: m.age, address: m.address,
           relationship: m.relationship, member_type: m.memberType, membership: m.membership, year_be: yearBE,
           applicant_name: d.applicantName, department: d.department, created_at: createdAt,
+          photo_id: m.photo ? `demo:${appId}|${rowNo[i]}` : (reused[i] ? reused[i].photo_id : ''),
+          photo_thumb: m.photo ? m.thumb : (reused[i] ? reused[i].photo_thumb : ''),
         }));
+        d.members.forEach((m, i) => { if (m.photo) db.photos[`${appId}|${rowNo[i]}`] = m.photo; });
         db.applications.push(application);
         db.members.push(...members);
         save(db);
-        return { ok: true, appId, application, members };
+        return { ok: true, appId, application, members: members.map((m) => Object.assign({}, m, { photo_thumb: undefined })) };
       },
       list() {
         const db = load();
         return { ok: true, applications: db.applications.slice(), members: db.members.slice() };
       },
+      photos(list) {
+        const db = load();
+        const out = {};
+        list.forEach((x) => {
+          const k = `${x.appId}|${x.seq}`;
+          const row = db.members.find((r) => `${r.app_id}|${r.seq}` === k);
+          const p = row && row.photo_id ? db.photos[String(row.photo_id).replace(/^demo:/, '')] : '';
+          if (p) out[k] = p;
+        });
+        return { ok: true, photos: out };
+      },
+      setPhoto(d) {
+        const db = load();
+        const k = `${d.appId}|${d.seq}`;
+        const row = db.members.find((r) => `${r.app_id}|${r.seq}` === k);
+        if (!row) throw new Error('ไม่พบสมาชิก');
+        db.photos[k] = d.photo;
+        row.photo_id = `demo:${k}`;
+        row.photo_thumb = d.thumb;
+        save(db);
+        return { ok: true, photo_id: row.photo_id, photo_thumb: row.photo_thumb };
+      },
     };
   })();
 
+  // Demo calls run synchronously but still reject like the server does.
+  const demoCall = (fn) => new Promise((resolve) => resolve(fn()));
   const api = {
-    submit: (data) => (DEMO ? Promise.resolve(demo.submit(data)) : call('submit', { data })),
-    list: (key) => (DEMO ? Promise.resolve(demo.list()) : call('list', { key })),
+    submit: (data) => (DEMO ? demoCall(() => demo.submit(data)) : call('submit', { data })),
+    list: (key) => (DEMO ? demoCall(() => demo.list()) : call('list', { key })),
+    photos: (key, members) => (DEMO ? demoCall(() => demo.photos(members)) : call('photos', { key, members })),
+    setPhoto: (key, d) => (DEMO ? demoCall(() => demo.setPhoto(d)) : call('setPhoto', Object.assign({ key }, d))),
   };
+
+  // ------------------------------------------------------------------ photos
+  // Every photo is cropped to 3:4 (รูปถ่าย 1 นิ้ว) in the browser: a card-size JPEG plus a small thumbnail for the registry.
+  const PHOTO_SIZE = [450, 600];
+  const THUMB_SIZE = [96, 128];
+  const PERSON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="4" fill="currentColor"/>' +
+    '<path d="M4 21c.8-4 4-6.2 8-6.2s7.2 2.2 8 6.2" fill="currentColor"/></svg>';
+
+  function loadImage(file) {
+    const viaImg = () => new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { resolve(img); setTimeout(() => URL.revokeObjectURL(url), 0); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+      img.src = url;
+    });
+    if (!window.createImageBitmap) return viaImg();
+    return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(viaImg);
+  }
+
+  function drawCrop(src, w, h, quality) {
+    const sw = src.naturalWidth || src.width;
+    const sh = src.naturalHeight || src.height;
+    const want = w / h;
+    let cw = sw; let ch = sh; let cx = 0; let cy = 0;
+    if (sw / sh > want) { cw = sh * want; cx = (sw - cw) / 2; } // wide: keep the middle
+    else { ch = sw / want; cy = (sh - ch) * 0.3; }            // tall: keep the head
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, w, h);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, cx, cy, cw, ch, 0, 0, w, h);
+    return { canvas: c, url: c.toDataURL('image/jpeg', quality) };
+  }
+
+  async function makePhoto(file) {
+    if (!file) throw new Error('ไม่ได้เลือกไฟล์');
+    if (file.type && !/^image\//.test(file.type)) throw new Error('กรุณาเลือกไฟล์รูปภาพ');
+    if (file.size > 30 * 1024 * 1024) throw new Error('ไฟล์รูปใหญ่เกินไป (เกิน 30 MB)');
+    let img;
+    try { img = await loadImage(file); } catch (e) {
+      throw new Error('เปิดไฟล์รูปนี้ไม่ได้ ลองใช้ไฟล์ JPG หรือ PNG');
+    }
+    const full = drawCrop(img, PHOTO_SIZE[0], PHOTO_SIZE[1], 0.85);
+    const thumb = drawCrop(full.canvas, THUMB_SIZE[0], THUMB_SIZE[1], 0.75);
+    if (img.close) img.close();
+    return { photo: full.url, thumb: thumb.url };
+  }
+
+  // One hidden <input type=file> serves the form and the registry; `onPicked` says where the photo goes.
+  let onPicked = null;
+  function pickPhoto(handler) {
+    onPicked = handler;
+    const input = $('#photo-input');
+    input.value = '';
+    input.click();
+  }
+  async function onPhotoChosen(e) {
+    const file = e.target.files && e.target.files[0];
+    const handler = onPicked;
+    onPicked = null;
+    if (!file || !handler) return;
+    try {
+      await handler(await makePhoto(file));
+    } catch (err) {
+      toast(err.message || 'ใช้รูปนี้ไม่ได้', true);
+    }
+  }
 
   // ------------------------------------------------------------------ views
   function switchView(name) {
@@ -334,13 +465,50 @@
       `<label><input type="radio" name="${name}" value="${esc(value)}"${value === selected ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
   }
 
-  function typeCards(name, selected) {
-    return MEMBER_TYPE_CARDS.map(([value, title, sub]) =>
-      `<label><input type="radio" name="${name}" value="${esc(value)}"${value === selected ? ' checked' : ''}>` +
-      `<span class="opt-text"><span class="opt-title">${esc(title)}</span><span class="opt-sub">${esc(sub)}</span></span></label>`).join('');
+  // `full` = {type: message} for a type whose rows are used up by the other members (ข้อ ๖.๓: บุคคลภายนอก ≤ 3)
+  function typeCards(name, selected, full) {
+    return MEMBER_TYPE_CARDS.map(([value, title, sub]) => {
+      const off = full[value] && value !== selected;
+      return `<label${off ? ' class="is-full"' : ''}><input type="radio" name="${name}" value="${esc(value)}"` +
+        `${value === selected ? ' checked' : ''}${off ? ' disabled' : ''}>` +
+        `<span class="opt-text"><span class="opt-title">${esc(title)}${off ? ` <span class="full-tag">${esc(full[value])}</span>` : ''}</span>` +
+        `<span class="opt-sub">${esc(sub)}</span></span></label>`;
+    }).join('');
+  }
+
+  // Which member types the i-th member can still take, given the others
+  function typeLimits(i) {
+    const others = state.members.filter((_, k) => k !== i);
+    const out = others.filter(isOutsider).length;
+    const fam = others.filter((m) => m.memberType === FAMILY).length;
+    return {
+      [OUTSIDER]: out >= CFG.MAX_OUTSIDERS ? `ครบ ${CFG.MAX_OUTSIDERS} คนแล้ว` : '',
+      [FAMILY]: fam >= FAMILY_ROWS ? `ครบ ${FAMILY_ROWS} คนแล้ว` : '',
+    };
+  }
+
+  // "ใช้ที่อยู่เดียวกับ คนที่ 1 · คนที่ 2" — only members who already have an address (and a different one)
+  function addrCopyHtml(i) {
+    const mine = norm(state.members[i].address);
+    const seen = new Set([mine]);
+    const opts = [];
+    state.members.forEach((m, k) => {
+      const a = norm(m.address);
+      if (k === i || !a || seen.has(a)) return;
+      seen.add(a);
+      const first = String(m.fullName || '').trim().split(/\s+/).filter((w) => !/\.$/.test(w))[0] || '';
+      opts.push(`<button type="button" class="chip-btn" data-act="copy-address" data-from="${k}">คนที่ ${k + 1}${first ? ` ${esc(first)}` : ''}</button>`);
+    });
+    return opts.length ? `<span class="addr-copy-label">ใช้ที่อยู่เดียวกับ</span>${opts.join('')}` : '';
+  }
+  function refreshAddrCopy() {
+    $$('#members .member').forEach((card) => { card.querySelector('.addr-copy').innerHTML = addrCopyHtml(Number(card.dataset.i)); });
   }
 
   function buildStatic() {
+    $('#form-intro').textContent = `กรอกข้อมูลผู้ยื่นและผู้เป็นสมาชิกได้สูงสุด ${CFG.MAX_MEMBERS} คนต่อใบ — ` +
+      `ครอบครัวพนักงาน (ประเภท ๒) ไม่เกิน ${FAMILY_ROWS} คน และบุคคลภายนอก (ประเภท ๓) ไม่เกิน ${CFG.MAX_OUTSIDERS} คน ` +
+      'บันทึกแล้วพิมพ์ใบสมัครเพื่อลงลายมือชื่อ';
     $('#purpose').innerHTML = radios('purpose', PURPOSES, 'สมัครใหม่');
     attachPicker(form.department, DEPTS.map((d) => ({
       value: deptLabel(d), key: matchKey(deptLabel(d)),
@@ -360,7 +528,6 @@
     state = { members: [blankMember()], renewedFrom: '' };
     form.formDate.value = todayISO();
     form.querySelector('input[name=purpose][value="สมัครใหม่"]').checked = true;
-    delete form.photoCount.dataset.touched;
     $('#renew-note').hidden = true;
     $('#form-error').hidden = true;
     $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
@@ -378,13 +545,12 @@
           <span class="member-no">${i + 1}</span>
           <span class="member-label">สมาชิกคนที่ ${i + 1}</span>
           <div class="member-tools">
-            ${i > 0 ? '<button type="button" class="link-btn" data-act="copy-address">ใช้ที่อยู่เดียวกับลำดับที่ 1</button>' : ''}
             ${state.members.length > 1 ? `<button type="button" class="icon-btn" data-act="remove" aria-label="ลบสมาชิกลำดับที่ ${i + 1}">&times;</button>` : ''}
           </div>
         </div>
         <div class="grid">
           <fieldset class="field span-3"><legend class="label">ประเภทสมาชิก</legend>
-            <div class="seg cards" data-k="memberType">${typeCards(`mtype-${i}`, m.memberType)}</div>
+            <div class="seg cards" data-k="memberType">${typeCards(`mtype-${i}`, m.memberType, typeLimits(i))}</div>
           </fieldset>
           <label class="field span-2"><span class="label">ชื่อ - สกุล</span>
             <input data-k="fullName" value="${esc(m.fullName)}" maxlength="150" required></label>
@@ -392,6 +558,7 @@
             <input data-k="age" type="number" min="0" max="120" inputmode="numeric" value="${esc(m.age)}" required></label>
           <label class="field span-3"><span class="label">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน (ที่สามารถติดต่อได้)</span>
             <textarea data-k="address" rows="2" maxlength="400" required>${esc(m.address)}</textarea></label>
+          <div class="addr-copy span-3">${addrCopyHtml(i)}</div>
           <fieldset class="field span-3"><legend class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น</legend>
             <div class="seg small chips" data-k="relationship">${radios(`rel-${i}`,
               relOptions(m).map((v) => [v, v]).concat([[REL_OTHER, 'อื่น ๆ']]), relChoice(m))}</div>
@@ -401,10 +568,33 @@
           <fieldset class="field span-3"><legend class="label">สมาชิกภาพ</legend>
             <div class="seg small" data-k="membership">${radios(`membership-${i}`, MEMBERSHIP.map((v) => [v, v]), m.membership)}</div>
           </fieldset>
+          ${photoField(m, i)}
         </div>
       </div>`).join('');
     $('#add-member').hidden = state.members.length >= max;
     updateCountsAndFees();
+  }
+
+  // สมัครใหม่: photo required (used for the member card) · ต่ออายุ: last year's photo is reused, a new one is optional
+  function photoField(m, i) {
+    const renew = m.membership === 'ต่ออายุ';
+    const label = renew
+      ? 'รูปถ่าย <span class="opt-note">— ต่ออายุใช้รูปเดิมในระบบ ไม่ต้องแนบ</span>'
+      : 'รูปถ่ายหน้าตรง <span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
+    const hint = renew
+      ? 'แนบใหม่เฉพาะเมื่อต้องการเปลี่ยนรูปบนบัตร'
+      : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ ระบบจะตัดเป็นรูปแนวตั้ง 3:4 ให้เอง';
+    return `<div class="field span-3 photo-field${renew && !m.photo ? ' is-renew' : ''}"><span class="label">${label}</span>
+      <div class="photo-row">
+        <button type="button" class="photo-box${m.thumb ? ' has-photo' : ''}" data-act="photo"
+          aria-label="${m.thumb ? 'เปลี่ยนรูปถ่าย' : 'เลือกรูปถ่าย'}สมาชิกคนที่ ${i + 1}">${m.thumb ? `<img src="${esc(m.thumb)}" alt="">` : PERSON_ICON}</button>
+        <div class="photo-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-act="photo">${m.photo ? 'เปลี่ยนรูป' : (renew ? 'แนบรูปใหม่' : 'เลือกรูป / ถ่ายรูป')}</button>
+          ${m.photo ? '<button type="button" class="link-btn" data-act="photo-remove">ลบรูป</button>' : ''}
+          <small class="hint">${hint}</small>
+        </div>
+      </div>
+    </div>`;
   }
 
   function setListHint(input, hint, hasList, isKnown, emptyMsg, unknownMsg) {
@@ -425,7 +615,6 @@
 
   function updateCountsAndFees() {
     const n = state.members.length;
-    if (!form.photoCount.dataset.touched) form.photoCount.value = n * 2;
     const f = computeFees(state.members);
     $('#fees').innerHTML = `
       <tr><td>ค่าจัดทำบัตรสมาชิก <span class="calc">${CFG.CARD_FEE} บาท/คน/ปี × ${f.cardPeople} คน${CFG.CARD_FEE_ON_RENEW ? '' : ' (เฉพาะสมัครใหม่)'}</span></td><td>${baht(f.cardFee)} บาท</td></tr>
@@ -476,14 +665,14 @@
           m.relationship = t.value;
           other.hidden = true;
           other.classList.remove('invalid');
-          if (!m.memberType && FAMILY_RELATIONSHIPS.includes(t.value)) { // picking คู่สมรส/บุตร… implies family
+          if (!m.memberType && FAMILY_RELATIONSHIPS.includes(t.value) && !typeLimits(i)[FAMILY]) { // คู่สมรส/บุตร… implies family
             m.memberType = FAMILY;
             renderMembers();
           }
         }
       } else {
         m.membership = t.value;
-        updateCountsAndFees();
+        renderMembers(); // the photo field differs for สมัครใหม่ / ต่ออายุ
       }
       return;
     }
@@ -491,20 +680,35 @@
     if (k === 'relationshipOther') m.relationship = t.value;
     else if (k) m[k] = t.value;
     if (k === 'fullName' && isOutsider(m)) updateCert();
+    if (k === 'address' || k === 'fullName') refreshAddrCopy();
   }
 
   function onMembersClick(e) {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
     const i = Number(btn.closest('.member').dataset.i);
-    if (btn.dataset.act === 'remove') {
+    const m = state.members[i];
+    const act = btn.dataset.act;
+    if (act === 'remove') {
       state.members.splice(i, 1);
       renderMembers();
-    } else if (btn.dataset.act === 'copy-address') {
-      state.members[i].address = state.members[0].address;
+    } else if (act === 'copy-address') {
+      m.address = state.members[Number(btn.dataset.from)].address;
       const ta = btn.closest('.member').querySelector('[data-k=address]');
-      ta.value = state.members[i].address;
+      ta.value = m.address;
       ta.classList.remove('invalid');
+      refreshAddrCopy();
+    } else if (act === 'photo') {
+      pickPhoto((r) => {
+        m.photo = r.photo;
+        m.thumb = r.thumb;
+        if (state.members.includes(m)) renderMembers();
+        $('#form-error').hidden = true;
+      });
+    } else if (act === 'photo-remove') {
+      delete m.photo;
+      delete m.thumb;
+      renderMembers();
     }
   }
 
@@ -527,11 +731,11 @@
       department: canonicalDept(form.department.value),
       position: canonicalPosition(form.position.value),
       purpose: checked('purpose'),
-      photoCount: int(form.photoCount.value),
       renewedFrom: state.renewedFrom || '',
       members: state.members.map((m) => ({
         fullName: String(m.fullName).trim(), age: int(m.age), address: String(m.address).trim(),
         relationship: String(m.relationship).trim(), memberType: m.memberType, membership: m.membership,
+        photo: m.photo || undefined, thumb: m.photo ? m.thumb : undefined,
       })),
       agree: form.agree.checked,
     };
@@ -558,13 +762,11 @@
       }
       if (!MEMBER_TYPES.some(([v]) => v === m.memberType)) bad(f('memberType'), `กรุณาเลือกประเภทสมาชิกลำดับที่ ${n}`);
       if (!MEMBERSHIP.includes(m.membership)) bad(f('membership'), `กรุณาเลือกสมาชิกภาพลำดับที่ ${n}`);
+      if (m.membership === 'สมัครใหม่' && !m.photo) bad(card.querySelector('.photo-box'), `กรุณาแนบรูปถ่ายของสมาชิกคนที่ ${n} (สมัครใหม่)`);
     });
     const outsiderCount = d.members.filter(isOutsider).length;
     countRuleErrors(d.members.length - outsiderCount, outsiderCount)
       .forEach((msg) => errors.push({ el: $('#members'), msg }));
-    [['photoCount', 'จำนวนรูปถ่าย']].forEach(([k, label]) => {
-      if (!Number.isInteger(d[k]) || d[k] < 0 || d[k] > 100) bad(form[k], `${label}ไม่ถูกต้อง`);
-    });
     if (outsiderCount && !d.agree) bad(form.agree.closest('.check'), 'กรุณาติ๊กคำรับรองสำหรับบุคคลภายนอก');
     return errors;
   }
@@ -642,7 +844,7 @@
     state.renewedFrom = appId;
     renderMembers();
     const note = $('#renew-note');
-    note.textContent = `ต่ออายุจากใบสมัครเลขที่ ${appId} (ปี ${app.year_be})` +
+    note.textContent = `ต่ออายุจากใบสมัครเลขที่ ${appId} (${yearLabel(app.year_be)})` +
       (diff ? ` · ปรับอายุสมาชิกเพิ่ม ${diff} ปีแล้ว` : '') + ' — ตรวจสอบข้อมูลก่อนบันทึก';
     note.hidden = false;
     switchView('form');
@@ -711,7 +913,7 @@
         <p class="pf-cert">${esc(certText(`(ลำดับที่ ${outRows.join(', ')})`))}</p>` : '<div class="pf-h2">รูปถ่ายและค่าธรรมเนียม</div>'}
         <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบรูปถ่ายและค่าธรรมเนียมในการสมัครเป็นสมาชิก มาดังนี้</p>
         <table class="pf-attach">
-          <tr><td class="n">1.</td><td>รูปถ่ายขนาด 1 นิ้ว หน้าตรง ไม่สวมหมวก ของผู้สมัครคนละ 2 รูป</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} ใบ</td></tr>
+          <tr><td class="n">1.</td><td>รูปถ่ายหน้าตรงของผู้สมัคร (แนบในระบบ · ต่ออายุใช้รูปเดิม)</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} คน</td></tr>
           <tr><td class="n">2.</td><td>ค่าจัดทำบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน/ปี (สมาชิกประเภท ๒ และ ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
           <tr><td class="n">3.</td><td>ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
           ${Number(app.facility_fee) ? `<tr><td class="n">4.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
@@ -776,15 +978,157 @@
     root.style.cssText = '';
   }
 
+  // The form prints with page margins; cards print edge to edge so front and back line up when flipped.
+  function setPrintMode(mode) {
+    let st = $('#print-page-style');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'print-page-style';
+      document.head.appendChild(st);
+    }
+    st.textContent = mode === 'cards' ? '@page { size: A4 portrait; margin: 0; }' : '';
+    document.body.dataset.print = mode;
+  }
+
   function printApplication(app, members) {
+    setPrintMode('form');
     const root = $('#print-root');
     root.innerHTML = renderPrint(app, members);
     const go = () => { fitPrintFields(root); window.print(); };
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(go); else go();
   }
 
+  // ================================================================== MEMBER CARDS
+  // A4 portrait, 2 × 5 cards of 85.6 × 54 mm (บัตรประชาชน / CR80). Sheet 1 = fronts, sheet 2 = backs with each
+  // row's two cards swapped, so printing on both sides (flip on long edge) puts every back behind its front.
+  const CARD_COLS = 2;
+  const CARD_ROWS = 5;
+  const CARDS_PER_SHEET = CARD_COLS * CARD_ROWS;
+  const RULE_SHORT = String(CFG.RULE_REF).split(' แนวปฏิบัติ')[0];
+
+  const memberNo = (x) => `${x.app_id}-${pad(x.seq)}`;
+
+  function cardFront(x, photo, issued) {
+    const out = isOutsider(x);
+    const pic = photo ? `<img src="${esc(photo)}" alt="">` : '<span class="cd-nophoto">ติดรูปถ่าย<br>1 นิ้ว</span>';
+    return `<div class="cd cd-front ${out ? 't-out' : 't-fam'}">
+      <div class="cd-head">
+        ${CFG.CARD_LOGO ? `<img class="cd-logo" src="${esc(CFG.CARD_LOGO)}" alt="">` : ''}
+        <div class="cd-head-text"><div class="cd-title">${esc(CFG.CARD_TITLE)}</div><div class="cd-org">${esc(CFG.CERTIFIER_UNIT)}</div></div>
+      </div>
+      <div class="cd-type"><span>${out ? 'ประเภท ๓ · บุคคลภายนอก' : 'ประเภท ๒ · ครอบครัวพนักงาน'}</span><span class="cd-no">${esc(memberNo(x))}</span></div>
+      <div class="cd-body">
+        <div class="cd-photo">${pic}</div>
+        <div class="cd-info">
+          <div class="cd-name cd-fit">${esc(x.full_name)}</div>
+          <div class="cd-row"><span class="cd-k">${out ? 'ผู้รับรอง' : 'พนักงาน'}</span><span class="cd-v cd-fit">${esc(x.applicant_name)}</span></div>
+          <div class="cd-row"><span class="cd-k">ฐานะ</span><span class="cd-v cd-fit">${esc(x.relationship)}</span></div>
+          <div class="cd-row"><span class="cd-k">สิทธิ์</span><span class="cd-v cd-fit">${esc(out ? CFG.OUTSIDER_RIGHTS : CFG.FAMILY_RIGHTS)}</span></div>
+          ${out ? `<div class="cd-row"><span class="cd-k"></span><span class="cd-v cd-fit">${esc(CFG.OUTSIDER_HOURS)}</span></div>` : ''}
+          <div class="cd-dates">
+            <div><span class="cd-k">ออกบัตร</span>${esc(thMid(issued))}</div>
+            <div class="cd-exp"><span class="cd-k">หมดอายุ</span>${esc(thMid(yearEndISO(x.year_be)))}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function cardBack(x) {
+    const out = isOutsider(x);
+    const rules = [
+      'แสดงบัตรต่อเจ้าหน้าที่ทุกครั้งก่อนเข้าใช้บริการ และฝากบัตรไว้กับเจ้าหน้าที่',
+      out ? CFG.OUTSIDER_RULES : CFG.FAMILY_RIGHTS + ' ตามวันและเวลาที่กำหนด',
+      `บัตรใช้ได้ถึง ${thLong(yearEndISO(x.year_be)).replace(' พ.ศ.', '')} และต้องปฏิบัติตาม${RULE_SHORT}`,
+    ];
+    return `<div class="cd cd-back ${out ? 't-out' : 't-fam'}">
+      <div class="cd-back-head"><div class="cd-back-title">เงื่อนไขการใช้บัตร</div>
+        <div class="cd-back-id cd-fit">${esc(memberNo(x))} · ${esc(x.full_name)}</div></div>
+      <ol class="cd-rules">${rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
+      <div class="cd-sign"><span class="cd-line"></span><span>เจ้าหน้าที่ผู้ออกบัตร</span></div>
+      <div class="cd-return">หากพบบัตรนี้ โปรดส่งคืน${esc(CFG.CERTIFIER_UNIT)}${CFG.CARD_CONTACT ? ` · ${esc(CFG.CARD_CONTACT)}` : ''}</div>
+    </div>`;
+  }
+
+  function cropMarks() {
+    const xs = Array.from({ length: CARD_COLS + 1 }, (_, i) => i * 85.6);
+    const ys = Array.from({ length: CARD_ROWS + 1 }, (_, i) => i * 54);
+    return xs.map((x) => `<i class="cm v" style="left:${x}mm"></i>`).join('') +
+      ys.map((y) => `<i class="cm h" style="top:${y}mm"></i>`).join('');
+  }
+
+  function renderCards(rows, photos, issued) {
+    const sheets = [];
+    for (let i = 0; i < rows.length; i += CARDS_PER_SHEET) {
+      const chunk = rows.slice(i, i + CARDS_PER_SHEET);
+      const slots = Array.from({ length: CARDS_PER_SHEET }, (_, k) => chunk[k]);
+      const n = sheets.length / 2 + 1;
+      const total = Math.ceil(rows.length / CARDS_PER_SHEET);
+      const front = slots.map((x) => (x ? cardFront(x, photos[rowKey(x)] || x.photo_thumb, issued) : '<div class="cd-slot"></div>')).join('');
+      const back = [];
+      for (let r = 0; r < CARD_ROWS; r++) {
+        for (let c = CARD_COLS - 1; c >= 0; c--) { // mirrored: flip on the long edge
+          const x = slots[r * CARD_COLS + c];
+          back.push(x ? cardBack(x) : '<div class="cd-slot"></div>');
+        }
+      }
+      sheets.push(`<section class="cd-sheet"><div class="cd-grid">${front}${cropMarks()}</div>
+        <div class="cd-sheet-note">บัตรสมาชิก · ด้านหน้า · ชุดที่ ${n}/${total} · ${chunk.length} ใบ — พิมพ์สองหน้าแบบกลับด้านยาว ตัดตามเส้น</div></section>`);
+      sheets.push(`<section class="cd-sheet"><div class="cd-grid">${back.join('')}</div>
+        <div class="cd-sheet-note">บัตรสมาชิก · ด้านหลัง · ชุดที่ ${n}/${total}</div></section>`);
+    }
+    return `<div class="cd-print">${sheets.join('')}</div>`;
+  }
+
+  // Shrink one-line values (long names, long ผู้รับรอง names) until they fit their box.
+  function fitCards(root) {
+    root.style.cssText = 'display:block;position:absolute;left:-10000px;top:0;width:210mm';
+    root.querySelectorAll('.cd-fit').forEach((el) => {
+      let size = parseFloat(getComputedStyle(el).fontSize) * 0.75; // px → pt
+      while (el.scrollWidth > el.clientWidth + 0.5 && size > 5) {
+        size -= 0.25;
+        el.style.fontSize = size + 'pt';
+      }
+    });
+    root.style.cssText = '';
+  }
+
+  async function printCards() {
+    const rows = reg.rows.filter((x) => reg.picked.has(rowKey(x)) && x.status === 'active');
+    if (!rows.length) { toast('เลือกสมาชิกที่ต้องการพิมพ์บัตรก่อน', true); return; }
+    const btn = $('#print-cards');
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.textContent = 'กำลังเตรียมบัตร…';
+    try {
+      const photos = {};
+      const withPhoto = rows.filter((x) => x.photo_id);
+      for (let i = 0; i < withPhoto.length; i += CARDS_PER_SHEET) {
+        const r = await api.photos(kv.get(KEY_STORE, 'session'),
+          withPhoto.slice(i, i + CARDS_PER_SHEET).map((x) => ({ appId: x.app_id, seq: x.seq })));
+        Object.assign(photos, r.photos || {});
+      }
+      setPrintMode('cards');
+      const root = $('#print-root');
+      root.innerHTML = renderCards(rows, photos, todayISO());
+      await Promise.all($$('img', root).map((img) => (img.decode ? img.decode().catch(() => {}) : null)));
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      fitCards(root);
+      const missing = rows.length - rows.filter((x) => photos[rowKey(x)] || x.photo_thumb).length;
+      if (missing) toast(`${missing} คนยังไม่มีรูป — บัตรจะเว้นช่องไว้ติดรูปถ่าย`);
+      window.print();
+    } catch (err) {
+      if (err.code === 401) { kv.del(KEY_STORE, 'session'); showLock('รหัสเจ้าหน้าที่ไม่ถูกต้อง'); }
+      else toast(err.message || 'เตรียมบัตรไม่สำเร็จ', true);
+    } finally {
+      delete btn.dataset.busy;
+      updatePickButton();
+    }
+  }
+
   // ================================================================== REGISTRY
-  const reg = { loaded: false, loading: false, rows: [], apps: [], appsById: {}, membersByApp: {} };
+  const reg = { loaded: false, loading: false, rows: [], apps: [], appsById: {}, membersByApp: {}, picked: new Set() };
+  const rowKey = (x) => `${x.app_id}|${x.seq}`;
 
   function showLock(msg) {
     $('#registry').hidden = true;
@@ -852,12 +1196,15 @@
     });
     rows.sort((a, b) => b.year_be - a.year_be || (a.app_id < b.app_id ? 1 : a.app_id > b.app_id ? -1 : 0) || a.seq - b.seq);
     reg.rows = rows;
+    reg.byKey = {};
+    rows.forEach((x) => { reg.byKey[rowKey(x)] = x; });
+    reg.picked = new Set([...reg.picked].filter((k) => reg.byKey[k] && reg.byKey[k].status === 'active'));
 
     const keepYear = $('#f-year').value;
     const keepDept = $('#f-dept').value;
     const years = Array.from(new Set(rows.map((x) => x.year_be))).sort((a, b) => b - a);
     const depts = Array.from(new Set(rows.map((x) => x.department).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'th'));
-    $('#f-year').innerHTML = '<option value="">ทุกปี</option>' + years.map((y) => `<option value="${y}">ปี ${y}</option>`).join('');
+    $('#f-year').innerHTML = '<option value="">ทุกปี</option>' + years.map((y) => `<option value="${y}">${yearLabel(y)}</option>`).join('');
     $('#f-dept').innerHTML = '<option value="">ทุกสังกัด</option>' + depts.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
     if (years.includes(Number(keepYear))) $('#f-year').value = keepYear;
     if (depts.includes(keepDept)) $('#f-dept').value = keepDept;
@@ -887,18 +1234,28 @@
     const newCount = curRows.filter((x) => x.membership === 'สมัครใหม่').length;
     const fees = curApps.reduce((s, a) => s + Number(a.total_fee || 0), 0);
     const curOut = curRows.filter(isOutsider).length;
+    const noPhoto = curRows.filter((x) => !x.photo_thumb).length;
     $('#tiles').innerHTML = `
-      <div class="tile"><div class="tile-label">สมาชิกปี ${cur}</div><div class="tile-value">${curRows.length}</div><div class="tile-sub">ครอบครัว ${curRows.length - curOut} · บุคคลภายนอก ${curOut}</div></div>
-      <div class="tile"><div class="tile-label">สมัครใหม่ / ต่ออายุ</div><div class="tile-value">${newCount} / ${curRows.length - newCount}</div><div class="tile-sub">ปี ${cur}</div></div>
+      <div class="tile"><div class="tile-label">สมาชิก${yearLabel(cur)}</div><div class="tile-value">${curRows.length}</div><div class="tile-sub">ครอบครัว ${curRows.length - curOut} · บุคคลภายนอก ${curOut}</div></div>
+      <div class="tile"><div class="tile-label">สมัครใหม่ / ต่ออายุ</div><div class="tile-value">${newCount} / ${curRows.length - newCount}</div><div class="tile-sub">บัตรหมดอายุ ${thMid(yearEndISO(cur))}</div></div>
       <div class="tile${renewCount ? ' warn' : ''}"><div class="tile-label">ต้องต่ออายุ</div><div class="tile-value">${renewCount}</div><div class="tile-sub">สมาชิกปีก่อนที่ยังไม่ต่อ</div></div>
-      <div class="tile"><div class="tile-label">ค่าธรรมเนียมปี ${cur}</div><div class="tile-value">${baht(fees)}</div><div class="tile-sub">บาท จาก ${curApps.length} ใบสมัคร</div></div>`;
+      <div class="tile${noPhoto ? ' warn' : ''}"><div class="tile-label">ยังไม่มีรูปถ่าย</div><div class="tile-value">${noPhoto}</div><div class="tile-sub">สมาชิก${yearLabel(cur)}</div></div>
+      <div class="tile"><div class="tile-label">ค่าธรรมเนียม${yearLabel(cur)}</div><div class="tile-value">${baht(fees)}</div><div class="tile-sub">บาท จาก ${curApps.length} ใบสมัคร</div></div>`;
 
     const rows = filteredRows();
     const LIMIT = 500;
-    const body = rows.slice(0, LIMIT).map((x) => {
+    const shown = rows.slice(0, LIMIT);
+    const body = shown.map((x) => {
       const [cls, label] = STATUS[x.status];
       const canRenew = x.year_be < cur;
-      return `<tr>
+      const k = rowKey(x);
+      const canCard = x.status === 'active';
+      return `<tr${reg.picked.has(k) ? ' class="picked"' : ''}>
+        <td class="pick-cell"><div class="pick">
+          <input type="checkbox" data-pick="${esc(k)}" aria-label="เลือกพิมพ์บัตร ${esc(x.full_name)}"${reg.picked.has(k) ? ' checked' : ''}${canCard ? '' : ' disabled title="พิมพ์บัตรได้เฉพาะสมาชิกปีนี้"'}>
+          <button type="button" class="thumb${x.photo_thumb ? '' : ' no-photo'}" data-act="photo" data-key="${esc(k)}"
+            title="${x.photo_thumb ? 'เปลี่ยนรูปถ่าย' : 'เพิ่มรูปถ่าย'}">${x.photo_thumb ? `<img src="${esc(x.photo_thumb)}" alt="">` : `${PERSON_ICON}<span class="plus">+</span>`}</button>
+        </div></td>
         <td><span class="app-chip">${esc(x.app_id)}</span><span class="sub">ลำดับ ${x.seq} · ${esc(thShort(x.form_date))}</span></td>
         <td><strong>${esc(x.full_name)}</strong><span class="sub">${esc(x.relationship)} · ${esc(x.age)} ปี</span></td>
         <td class="addr">${esc(x.address)}</td>
@@ -910,9 +1267,13 @@
           ${canRenew ? `<button type="button" class="btn btn-ghost btn-sm" data-act="renew" data-app="${esc(x.app_id)}">ต่ออายุ</button>` : ''}
         </div></td></tr>`;
     }).join('');
+    const pickable = shown.filter((x) => x.status === 'active');
+    const allOn = pickable.length > 0 && pickable.every((x) => reg.picked.has(rowKey(x)));
     $('#reg-table').innerHTML = `
-      <thead><tr><th>เลขที่ใบสมัคร</th><th>สมาชิก</th><th>ที่อยู่ / ที่ทำงาน</th><th>ประเภท / สมาชิกภาพ</th><th>ผู้ยื่น / ผู้รับรอง</th><th>สถานะ</th><th></th></tr></thead>
-      <tbody>${body || `<tr><td class="empty" colspan="7">${reg.rows.length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีข้อมูลสมาชิก'}</td></tr>`}</tbody>`;
+      <thead><tr><th class="pick-cell"><input type="checkbox" id="pick-all" aria-label="เลือกทั้งหมดที่แสดง (สมาชิกปีนี้)"${allOn ? ' checked' : ''}${pickable.length ? '' : ' disabled'}></th>
+        <th>เลขที่ใบสมัคร</th><th>สมาชิก</th><th>ที่อยู่ / ที่ทำงาน</th><th>ประเภท / สมาชิกภาพ</th><th>ผู้ยื่น / ผู้รับรอง</th><th>สถานะ</th><th></th></tr></thead>
+      <tbody>${body || `<tr><td class="empty" colspan="8">${reg.rows.length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีข้อมูลสมาชิก'}</td></tr>`}</tbody>`;
+    updatePickButton();
     $('#reg-count').textContent = `แสดง ${Math.min(rows.length, LIMIT).toLocaleString('th-TH')} จาก ${reg.rows.length.toLocaleString('th-TH')} รายการ` +
       (rows.length > LIMIT ? ` (ใช้ตัวกรองเพื่อดูรายการที่เหลือ หรือส่งออก CSV)` : '');
   }
@@ -947,7 +1308,47 @@
       if (app) printApplication(app, reg.membersByApp[id] || []);
     } else if (btn.dataset.act === 'renew') {
       prefillRenewal(id);
+    } else if (btn.dataset.act === 'photo') {
+      const x = reg.byKey[btn.dataset.key];
+      if (x) pickPhoto((r) => savePhoto(x, r));
     }
+  }
+
+  // Staff adds / replaces a photo from the registry (e.g. one taken at the counter).
+  async function savePhoto(x, r) {
+    const cell = $(`#reg-table button.thumb[data-key="${CSS.escape(rowKey(x))}"]`);
+    if (cell) cell.classList.add('busy');
+    try {
+      const res = await api.setPhoto(kv.get(KEY_STORE, 'session'), { appId: x.app_id, seq: x.seq, photo: r.photo, thumb: r.thumb });
+      x.photo_id = res.photo_id;
+      x.photo_thumb = res.photo_thumb;
+      renderRegistry();
+      toast(`บันทึกรูปของ ${x.full_name} แล้ว`);
+    } catch (err) {
+      if (cell) cell.classList.remove('busy');
+      toast(err.message || 'บันทึกรูปไม่สำเร็จ', true);
+    }
+  }
+
+  function onRegistryPick(e) {
+    const t = e.target;
+    if (t.id === 'pick-all') {
+      const shown = filteredRows().slice(0, 500).filter((x) => x.status === 'active');
+      shown.forEach((x) => { if (t.checked) reg.picked.add(rowKey(x)); else reg.picked.delete(rowKey(x)); });
+      renderRegistry();
+    } else if (t.dataset.pick) {
+      if (t.checked) reg.picked.add(t.dataset.pick); else reg.picked.delete(t.dataset.pick);
+      t.closest('tr').classList.toggle('picked', t.checked);
+      updatePickButton();
+    }
+  }
+
+  function updatePickButton() {
+    const n = reg.picked.size;
+    const btn = $('#print-cards');
+    if (btn.dataset.busy) return;
+    btn.disabled = !n;
+    btn.textContent = n ? `พิมพ์บัตร (${n})` : 'พิมพ์บัตร';
   }
 
   // ================================================================== wire up
@@ -970,7 +1371,6 @@
     });
     form.addEventListener('input', (e) => {
       $('#form-error').hidden = true;
-      if (e.target === form.photoCount) e.target.dataset.touched = '1';
       if (!e.target.closest('.member')) {
         e.target.classList.remove('invalid');
         const seg = e.target.closest('.seg, .check');
@@ -1010,6 +1410,9 @@
       showLock();
     });
     $('#reg-table').addEventListener('click', onRegistryClick);
+    $('#reg-table').addEventListener('change', onRegistryPick);
+    $('#print-cards').addEventListener('click', printCards);
+    $('#photo-input').addEventListener('change', onPhotoChosen);
 
     if (location.hash === '#registry') switchView('registry');
   }
