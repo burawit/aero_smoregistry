@@ -15,7 +15,7 @@ window.APP_CONFIG = {
   MEMBERSHIP_YEAR_START_MONTH: 10,
 
   // บัตรสมาชิก (optional)
-  // CARD_LOGO: "logo.png",                 // รูปโลโก้ในโฟลเดอร์นี้ แสดงที่หัวบัตร
+  CARD_LOGO: "images/logo-seal.svg",       // ตราบริษัทที่หัวบัตร (โลโก้เต็ม: images/logo-aerothai.svg)
   // CARD_CONTACT: "โทร 0 5320 0000",        // ด้านหลังบัตร ต่อท้าย "หากพบบัตรนี้ โปรดส่งคืน…"
 
   // Printed on the staff section of the form
