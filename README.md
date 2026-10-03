@@ -107,6 +107,15 @@ Other rules:
   Optional `CARD_LOGO` and `CARD_CONTACT` in config.js.
 - Full photos are only returned by the `photos` action (staff key) and only for members listed in the sheet.
 
+## ต่ออายุ from the public form
+
+Choosing **ต่ออายุสมาชิก** shows "ดึงข้อมูลจากใบสมัครเดิม": the employee enters their **name (ข้อ 1) + previous application no.**
+(printed on the form / shown after saving). Both must match (`renewLookup`). Only member **names** come back (plus member
+type and whether a photo is on file) — age, address, ฐานะ and photos are never sent to the browser. Fields left blank keep
+the stored values: on save the server re-checks name + number, copies the blanks from the old row (age + years passed) and
+keeps the photo. Wrong guesses are rate-limited (5 per name, 40 in total, per hour; `LOOKUP` in Code.gs). Staff can still
+renew with full details from the registry.
+
 ## Security notes
 
 - Submitting is open to anyone who has the page URL. Reading the registry requires the staff key, which the server checks on every request. The key is kept in `sessionStorage` and cleared when the tab closes.

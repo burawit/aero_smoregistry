@@ -81,6 +81,17 @@
           <div class="card">
             <h2 class="card-title"><span class="step">2</span>มีความประสงค์ที่จะนำบุคคลต่อไปนี้</h2>
             <div class="seg" id="purpose"></div>
+            <div class="renew-lookup" id="renew-lookup" hidden>
+              <div class="renew-lookup-title">ดึงข้อมูลจากใบสมัครเดิม</div>
+              <p class="hint">กรอก <b>ชื่อ - สกุล ผู้ยื่น</b> ในข้อ 1 และ <b>เลขที่ใบสมัครเดิม</b> (อยู่ท้ายใบสมัครที่พิมพ์ และหน้าบันทึกเสร็จ
+                เช่น 2569-0012) แล้วกด "ดึงข้อมูล" — จำเลขที่ไม่ได้ ติดต่อเจ้าหน้าที่</p>
+              <div class="renew-lookup-row">
+                <input id="renew-app" inputmode="numeric" placeholder="เลขที่ใบสมัครเดิม เช่น 2569-0012" maxlength="12"
+                  autocomplete="off" aria-label="เลขที่ใบสมัครเดิม">
+                <button type="button" class="btn btn-primary btn-sm" id="renew-fetch" disabled>ดึงข้อมูล</button>
+              </div>
+              <small class="hint" id="renew-hint" role="status"></small>
+            </div>
           </div>
 
           <div class="card">

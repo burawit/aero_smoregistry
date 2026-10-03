@@ -202,14 +202,31 @@
       }
     };
     return {
-      submit(d) {
+      submit(input) {
         const db = load();
-        const yearBE = memberYear(d.formDate);
+        const yearBE = memberYear(input.formDate);
+        const key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+        const blank = (v) => v === undefined || v === null || String(v).trim() === '';
+        // ต่ออายุ via lookup (same as Code.gs): re-check the pair, blanks keep the stored values
+        const d = Object.assign({}, input, { members: input.members.map((m, i) => {
+          if (!m.renewOf) return m;
+          const oldApp = db.applications.find((a) => a.app_id === m.renewOf.appId && key(a.applicant_name) === key(input.applicantName));
+          if (!oldApp) { const err = new Error(`ใบสมัครเดิมเลขที่ ${m.renewOf.appId} ไม่ตรงกับชื่อผู้ยื่น`); err.code = 404; throw err; }
+          const old = db.members.find((r) => r.app_id === m.renewOf.appId && Number(r.seq) === Number(m.renewOf.seq));
+          if (!old) throw new Error(`ไม่พบสมาชิกคนที่ ${i + 1} ในใบสมัครเดิม ${m.renewOf.appId}`);
+          const years = Math.max(0, yearBE - Number(oldApp.year_be));
+          return Object.assign({}, m, {
+            age: blank(m.age) ? Number(old.age) + years : m.age,
+            address: blank(m.address) ? old.address : m.address,
+            relationship: blank(m.relationship) ? old.relationship : m.relationship,
+            memberType: blank(m.memberType) ? old.member_type : m.memberType,
+            kept: old.photo_id ? old : null,
+          });
+        }) });
         const outs = d.members.filter(isOutsider);
         const ruleErrs = countRuleErrors(d.members.length - outs.length, outs.length);
         if (ruleErrs.length) throw new Error(ruleErrs[0]);
         if (outs.length) {
-          const key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
           const already = new Set(db.members.filter((r) => r.member_type === OUTSIDER && r.year_be === yearBE &&
             key(r.applicant_name) === key(d.applicantName)).map((r) => key(r.full_name)));
           const total = new Set([...already, ...outs.map((m) => key(m.fullName))]);
@@ -222,10 +239,9 @@
         const appId = `${yearBE}-${String(db.seq[yearBE]).padStart(4, '0')}`;
         const f = computeFees(d.members);
         const createdAt = new Date().toISOString();
-        const key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
-        const reused = d.members.map((m) => (m.photo || m.membership !== 'ต่ออายุ' ? null
+        const reused = d.members.map((m) => (m.photo ? null : m.kept || (m.membership !== 'ต่ออายุ' ? null
           : db.members.slice().reverse().find((r) => r.photo_id && key(r.full_name) === key(m.fullName) &&
-            key(r.applicant_name) === key(d.applicantName)) || null));
+            key(r.applicant_name) === key(d.applicantName)) || null)));
         const application = {
           app_id: appId, year_be: yearBE, form_date: d.formDate, applicant_name: d.applicantName,
           applicant_type: d.applicantType, department: d.department, position: d.position, purpose: d.purpose,
@@ -264,6 +280,23 @@
         });
         return { ok: true, photos: out };
       },
+      renewLookup(appId, name) {
+        const db = load();
+        const key = (v) => String(v || '').replace(/\s+/g, '').toLowerCase();
+        const app = db.applications.find((a) => a.app_id === appId && key(a.applicant_name) === key(name));
+        if (!app) {
+          const err = new Error(`ไม่พบใบสมัครเลขที่ ${appId} ของ ${name} — ตรวจสอบชื่อและเลขที่ หรือติดต่อเจ้าหน้าที่`);
+          err.code = 404;
+          throw err;
+        }
+        const onFile = (m) => !!m.photo_id || db.members.some((r) => r.photo_id && key(r.full_name) === key(m.full_name) &&
+          key(r.applicant_name) === key(app.applicant_name));
+        const members = db.members.filter((m) => m.app_id === appId).sort((a, b) => a.seq - b.seq).map((m) => ({
+          seq: m.seq, full_name: m.full_name, member_type: m.member_type, has_photo: onFile(m),
+        }));
+        const { app_id, year_be, applicant_name, department, position } = app;
+        return { ok: true, application: { app_id, year_be, applicant_name, department, position }, members };
+      },
       setPhoto(d) {
         const db = load();
         const k = `${d.appId}|${d.seq}`;
@@ -285,6 +318,8 @@
     list: (key) => (DEMO ? demoCall(() => demo.list()) : call('list', { key })),
     photos: (key, members) => (DEMO ? demoCall(() => demo.photos(members)) : call('photos', { key, members })),
     setPhoto: (key, d) => (DEMO ? demoCall(() => demo.setPhoto(d)) : call('setPhoto', Object.assign({ key }, d))),
+    renewLookup: (appId, applicantName) => (DEMO ? demoCall(() => demo.renewLookup(appId, applicantName))
+      : call('renewLookup', { appId, applicantName })),
   };
 
   // ------------------------------------------------------------------ photos
@@ -531,6 +566,9 @@
     $('#renew-note').hidden = true;
     $('#form-error').hidden = true;
     $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
+    $('#renew-app').value = '';
+    delete $('#renew-hint').dataset.sticky;
+    updateRenewLookup();
     renderMembers();
     updateDateHint();
     updateDeptHint();
@@ -548,6 +586,8 @@
             ${state.members.length > 1 ? `<button type="button" class="icon-btn" data-act="remove" aria-label="ลบสมาชิกลำดับที่ ${i + 1}">&times;</button>` : ''}
           </div>
         </div>
+        ${m.carry ? `<p class="carry-note">ข้อมูลจากใบสมัครเดิม ${esc(m.carry.appId)} — ช่องที่เว้นว่างจะใช้ข้อมูลเดิมที่เก็บไว้ในระบบ
+          (อายุปรับเพิ่มตามปีให้เอง) กรอกเฉพาะช่องที่ต้องการเปลี่ยน เช่นเดียวกับรูปถ่าย</p>` : ''}
         <div class="grid">
           <fieldset class="field span-3"><legend class="label">ประเภทสมาชิก</legend>
             <div class="seg cards" data-k="memberType">${typeCards(`mtype-${i}`, m.memberType, typeLimits(i))}</div>
@@ -555,11 +595,11 @@
           <label class="field span-2"><span class="label">ชื่อ - สกุล</span>
             <input data-k="fullName" value="${esc(m.fullName)}" maxlength="150" required></label>
           <label class="field"><span class="label">อายุ (ปี)</span>
-            <input data-k="age" type="number" min="0" max="120" inputmode="numeric" value="${esc(m.age)}" required></label>
+            <input data-k="age" type="number" min="0" max="120" inputmode="numeric" value="${esc(m.age)}"${m.carry ? ' placeholder="ใช้ข้อมูลเดิม"' : ' required'}></label>
           <label class="field span-3"><span class="label">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน (ที่สามารถติดต่อได้)</span>
-            <textarea data-k="address" rows="2" maxlength="400" required>${esc(m.address)}</textarea></label>
+            <textarea data-k="address" rows="2" maxlength="400"${m.carry ? ' placeholder="เว้นว่าง = ใช้ที่อยู่เดิมในระบบ"' : ' required'}>${esc(m.address)}</textarea></label>
           <div class="addr-copy span-3">${addrCopyHtml(i)}</div>
-          <fieldset class="field span-3"><legend class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น</legend>
+          <fieldset class="field span-3"><legend class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น${m.carry ? ' <span class="opt-note">(ไม่เลือก = ใช้ข้อมูลเดิม)</span>' : ''}</legend>
             <div class="seg small chips" data-k="relationship">${radios(`rel-${i}`,
               relOptions(m).map((v) => [v, v]).concat([[REL_OTHER, 'อื่น ๆ']]), relChoice(m))}</div>
             <input data-k="relationshipOther" class="rel-other" placeholder="ระบุฐานะที่เกี่ยวข้อง" maxlength="150"
@@ -578,16 +618,21 @@
   // สมัครใหม่: photo required (used for the member card) · ต่ออายุ: last year's photo is reused, a new one is optional
   function photoField(m, i) {
     const renew = m.membership === 'ต่ออายุ';
-    const label = renew
-      ? 'รูปถ่าย <span class="opt-note">— ต่ออายุใช้รูปเดิมในระบบ ไม่ต้องแนบ</span>'
-      : 'รูปถ่ายหน้าตรง <span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
+    const prev = renew && !m.photo ? (m.prevThumb || '') : '';   // last year's photo (staff view), kept by the server
+    const kept = renew && !m.photo && m.carry && m.hasPhoto;     // public lookup: the photo stays hidden
+    const shown = m.thumb || prev;
+    let label;
+    if (!renew) label = 'รูปถ่ายหน้าตรง <span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
+    else if (prev || kept) label = 'รูปถ่าย <span class="opt-note">— มีรูปเดิมในระบบแล้ว ไม่ต้องแนบ</span>';
+    else if (m.carry) label = 'รูปถ่าย <span class="opt-note">— ยังไม่มีรูปในระบบ แนบได้เลย (ไม่บังคับ)</span>';
+    else label = 'รูปถ่าย <span class="opt-note">— ต่ออายุใช้รูปเดิมในระบบ ไม่ต้องแนบ</span>';
     const hint = renew
       ? 'แนบใหม่เฉพาะเมื่อต้องการเปลี่ยนรูปบนบัตร'
       : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ ระบบจะตัดเป็นรูปแนวตั้ง 3:4 ให้เอง';
-    return `<div class="field span-3 photo-field${renew && !m.photo ? ' is-renew' : ''}"><span class="label">${label}</span>
+    return `<div class="field span-3 photo-field${renew && !shown ? ' is-renew' : ''}"><span class="label">${label}</span>
       <div class="photo-row">
-        <button type="button" class="photo-box${m.thumb ? ' has-photo' : ''}" data-act="photo"
-          aria-label="${m.thumb ? 'เปลี่ยนรูปถ่าย' : 'เลือกรูปถ่าย'}สมาชิกคนที่ ${i + 1}">${m.thumb ? `<img src="${esc(m.thumb)}" alt="">` : PERSON_ICON}</button>
+        <button type="button" class="photo-box${shown ? ' has-photo' : ''}" data-act="photo"
+          aria-label="${shown ? 'เปลี่ยนรูปถ่าย' : 'เลือกรูปถ่าย'}สมาชิกคนที่ ${i + 1}">${shown ? `<img src="${esc(shown)}" alt="">` : PERSON_ICON}${prev ? '<span class="photo-tag">รูปเดิม</span>' : ''}${kept ? '<span class="photo-tag">มีรูปในระบบ</span>' : ''}</button>
         <div class="photo-actions">
           <button type="button" class="btn btn-ghost btn-sm" data-act="photo">${m.photo ? 'เปลี่ยนรูป' : (renew ? 'แนบรูปใหม่' : 'เลือกรูป / ถ่ายรูป')}</button>
           ${m.photo ? '<button type="button" class="link-btn" data-act="photo-remove">ลบรูป</button>' : ''}
@@ -736,6 +781,7 @@
         fullName: String(m.fullName).trim(), age: int(m.age), address: String(m.address).trim(),
         relationship: String(m.relationship).trim(), memberType: m.memberType, membership: m.membership,
         photo: m.photo || undefined, thumb: m.photo ? m.thumb : undefined,
+        renewOf: m.carry || undefined,
       })),
       agree: form.agree.checked,
     };
@@ -753,10 +799,13 @@
       const card = $(`.member[data-i="${i}"]`);
       const f = (k) => card.querySelector(`[data-k=${k}]`);
       const n = i + 1;
+      const carried = !!m.renewOf; // blanks keep the stored values
       if (!m.fullName) bad(f('fullName'), `กรุณากรอกชื่อ - สกุล สมาชิกลำดับที่ ${n}`);
-      if (m.age === '' || !Number.isInteger(m.age) || m.age < 0 || m.age > 120) bad(f('age'), `อายุของสมาชิกลำดับที่ ${n} ไม่ถูกต้อง`);
-      if (!m.address) bad(f('address'), `กรุณากรอกที่อยู่ของสมาชิกลำดับที่ ${n}`);
-      if (!m.relationship) {
+      if (!(carried && m.age === '') && (m.age === '' || !Number.isInteger(m.age) || m.age < 0 || m.age > 120)) {
+        bad(f('age'), `อายุของสมาชิกลำดับที่ ${n} ไม่ถูกต้อง`);
+      }
+      if (!m.address && !carried) bad(f('address'), `กรุณากรอกที่อยู่ของสมาชิกลำดับที่ ${n}`);
+      if (!m.relationship && !carried) {
         bad(relChoice(state.members[i]) === REL_OTHER ? f('relationshipOther') : f('relationship'),
           `กรุณาเลือกฐานะของสมาชิกลำดับที่ ${n}`);
       }
@@ -823,32 +872,96 @@
     window.scrollTo({ top: 0 });
   }
 
-  function prefillRenewal(appId) {
-    const app = reg.appsById[appId];
-    if (!app) return;
-    const ms = (reg.membersByApp[appId] || []).slice().sort((a, b) => a.seq - b.seq).slice(0, CFG.MAX_MEMBERS);
+  // Fill the form for ต่ออายุ from a previous application (registry rows or the public lookup).
+  function fillRenewal(app, members, fromLookup) {
+    const appId = String(app.app_id);
+    const ms = members.slice().sort((a, b) => a.seq - b.seq).slice(0, CFG.MAX_MEMBERS);
     const diff = Math.max(0, curYearBE() - Number(app.year_be));
-    startNewForm();
     form.applicantName.value = app.applicant_name || '';
     form.department.value = canonicalDept(app.department);
     updateDeptHint();
     form.position.value = canonicalPosition(app.position);
     updatePosHint();
     form.querySelector('input[name=purpose][value="ต่ออายุ"]').checked = true;
-    state.members = ms.map((m) => ({
-      fullName: m.full_name, age: m.age === '' ? '' : Number(m.age) + diff, address: m.address,
-      relationship: m.relationship, membership: 'ต่ออายุ',
-      memberType: MEMBER_TYPES.some(([v]) => v === m.member_type) ? m.member_type : '',
-    }));
+    const type = (m) => (MEMBER_TYPES.some(([v]) => v === m.member_type) ? m.member_type : '');
+    state.members = ms.map((m) => (fromLookup
+      // public lookup: names only — blank fields keep what is stored (Code.gs copies them on save)
+      ? { fullName: m.full_name, age: '', address: '', relationship: '', membership: 'ต่ออายุ', memberType: type(m),
+        carry: { appId, seq: Number(m.seq) }, hasPhoto: !!m.has_photo }
+      // staff, from the registry: full details
+      : { fullName: m.full_name, age: m.age === '' ? '' : Number(m.age) + diff, address: m.address,
+        relationship: m.relationship, membership: 'ต่ออายุ', memberType: type(m), prevThumb: m.photo_thumb || '' }));
     if (!state.members.length) state.members = [blankMember('ต่ออายุ')];
     state.renewedFrom = appId;
     renderMembers();
+    const stillValid = Number(app.year_be) >= curYearBE();
     const note = $('#renew-note');
     note.textContent = `ต่ออายุจากใบสมัครเลขที่ ${appId} (${yearLabel(app.year_be)})` +
-      (diff ? ` · ปรับอายุสมาชิกเพิ่ม ${diff} ปีแล้ว` : '') + ' — ตรวจสอบข้อมูลก่อนบันทึก';
+      (diff && !fromLookup ? ` · ปรับอายุสมาชิกเพิ่ม ${diff} ปีแล้ว` : '') +
+      (stillValid ? ` · ใบนี้ยังใช้ได้ถึง ${thMid(yearEndISO(app.year_be))}` : '') + ' — ตรวจสอบข้อมูลก่อนบันทึก';
     note.hidden = false;
+    updateRenewLookup();
+  }
+
+  function prefillRenewal(appId) { // staff, from the registry
+    const app = reg.appsById[appId];
+    if (!app) return;
+    startNewForm();
+    fillRenewal(app, reg.membersByApp[appId] || [], false);
     switchView('form');
     toast('โหลดข้อมูลสำหรับต่ออายุแล้ว');
+  }
+
+  // ต่ออายุ from the public form: ผู้ยื่น name + previous application no. (2569-0012, 2569-12 or 25690012)
+  function normalizeAppNo(v) {
+    const t = String(v || '').trim();
+    let m = /^(\d{4})\s*[-/]\s*(\d{1,4})$/.exec(t);
+    if (m) return `${m[1]}-${m[2].padStart(4, '0')}`;
+    m = /^(\d{4})(\d{4})$/.exec(t.replace(/\s+/g, ''));
+    return m ? `${m[1]}-${m[2]}` : '';
+  }
+
+  function updateRenewLookup() {
+    const renew = (form.querySelector('input[name=purpose]:checked') || {}).value === 'ต่ออายุ';
+    $('#renew-lookup').hidden = !renew;
+    const btn = $('#renew-fetch');
+    if (btn.dataset.busy) return;
+    const name = form.applicantName.value.trim();
+    const no = normalizeAppNo($('#renew-app').value);
+    btn.disabled = !name || !no;
+    const hint = $('#renew-hint');
+    if (hint.dataset.sticky) return;
+    hint.classList.remove('warn');
+    hint.textContent = !name ? 'กรอกชื่อ - สกุล ผู้ยื่นในข้อ 1 ก่อน จึงจะดึงข้อมูลได้'
+      : ($('#renew-app').value.trim() && !no ? 'รูปแบบเลขที่ใบสมัคร เช่น 2569-0012' : '');
+  }
+
+  async function fetchRenewal() {
+    const name = form.applicantName.value.trim();
+    const no = normalizeAppNo($('#renew-app').value);
+    if (!name || !no) { updateRenewLookup(); return; }
+    const btn = $('#renew-fetch');
+    const hint = $('#renew-hint');
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.textContent = 'กำลังค้นหา…';
+    try {
+      const r = await api.renewLookup(no, name);
+      $('#renew-app').value = no;
+      fillRenewal(r.application, r.members || [], true);
+      hint.dataset.sticky = '1';
+      hint.classList.remove('warn');
+      hint.textContent = `ดึงข้อมูลสมาชิก ${(r.members || []).length} คนจากใบสมัครเลขที่ ${no} แล้ว`;
+      $('#members').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      hint.dataset.sticky = '1';
+      hint.classList.add('warn');
+      hint.textContent = err.message || 'ดึงข้อมูลไม่สำเร็จ';
+    } finally {
+      delete btn.dataset.busy;
+      btn.textContent = 'ดึงข้อมูล';
+      btn.disabled = !normalizeAppNo($('#renew-app').value) || !form.applicantName.value.trim();
+    }
   }
 
   // ================================================================== PRINT
@@ -1383,8 +1496,16 @@
         const v = e.target.value;
         state.members.forEach((m) => { m.membership = v; });
         renderMembers();
+        updateRenewLookup();
+        if (v === 'ต่ออายุ' && !state.renewedFrom) $('#renew-lookup').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
+    form.applicantName.addEventListener('input', updateRenewLookup);
+    $('#renew-app').addEventListener('input', () => { delete $('#renew-hint').dataset.sticky; updateRenewLookup(); });
+    $('#renew-app').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); if (!$('#renew-fetch').disabled) fetchRenewal(); }
+    });
+    $('#renew-fetch').addEventListener('click', fetchRenewal);
     $('#members').addEventListener('input', onMembersInput);
     $('#members').addEventListener('change', onMembersInput);
     $('#members').addEventListener('click', onMembersClick);

@@ -421,6 +421,68 @@ textarea.invalid,
   padding: 0 8px;
 }
 
+/* ต่ออายุ: pull members from the previous application */
+.renew-lookup {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--primary);
+  border-radius: 10px;
+  background: var(--primary-soft);
+}
+
+.renew-lookup-title {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.renew-lookup .hint {
+  margin: 2px 0 8px;
+}
+
+.renew-lookup-row {
+  display: flex;
+  gap: 8px;
+}
+
+.renew-lookup-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.renew-lookup-row .btn {
+  flex: none;
+}
+
+#renew-hint:empty {
+  display: none;
+}
+
+.photo-box {
+  position: relative;
+}
+
+.photo-tag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(23, 32, 51, .72);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.carry-note {
+  margin: -2px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
 /* "ใช้ที่อยู่เดียวกับ คนที่ 1" */
 .addr-copy {
   display: flex;

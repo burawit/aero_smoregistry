@@ -11,6 +11,11 @@
  *
  * API (POST, body = JSON as text/plain so the browser skips the CORS preflight)
  *   { action: "submit", data: {...} }            → public: save one application
+ *   { action: "renewLookup", appId, applicantName } → public, for ต่ออายุ: NAMES (+ type, has photo) of a previous
+ *                                                   application's members — only when the ผู้ยื่น name matches; failed
+ *                                                   tries are rate-limited. On submit a member may carry
+ *                                                   renewOf: {appId, seq}; blank age/address/ฐานะ/type are then copied
+ *                                                   from that row (age + years passed) and its photo is kept.
  *   { action: "list",   key: "<ADMIN_KEY>" }     → staff: all applications + members (with photo thumbnails)
  *   { action: "photos", key, members: [{appId, seq}] }            → staff: full-size photos for printing cards
  *   { action: "setPhoto", key, appId, seq, photo, thumb }         → staff: add / replace a member's photo
@@ -59,6 +64,8 @@ const LIMITS = { maxMembers: 12, text: 150, address: 400 };
 const MEMBERSHIP_YEAR = { startMonth: 10 };
 // Photo: required for สมัครใหม่; a ต่ออายุ member without a new photo keeps the latest photo on file (same name + ผู้ยื่น).
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+// Public renewal lookup needs name + application no. Wrong guesses are capped per name and in total (per hour).
+const LOOKUP = { maxFailPerName: 5, maxFailTotal: 40, windowSec: 3600 };
 const PHOTO = { requiredForNew: true, maxBytes: 600 * 1024, maxThumbChars: 30000, perRequest: 24,
   folderName: 'รูปถ่ายสมาชิก (member-registry)' };
 const FAMILY_ROWS = LIMITS.maxMembers - RULES.maxOutsidersPerCertifier; // rows 1–9
@@ -79,6 +86,8 @@ function doPost(e) {
     switch (req.action) {
       case 'submit':
         return json_(submit_(req.data));
+      case 'renewLookup':
+        return json_(renewLookup_(req.appId, req.applicantName));
       case 'list':
         requireAdmin_(req.key);
         return json_(list_());
@@ -170,10 +179,11 @@ function submit_(d) {
     renewed_from: str_(d.renewedFrom, 20, null),
   };
 
-  const raw = Array.isArray(d.members) ? d.members : [];
-  if (raw.length < 1 || raw.length > LIMITS.maxMembers) {
+  const given = Array.isArray(d.members) ? d.members : [];
+  if (given.length < 1 || given.length > LIMITS.maxMembers) {
     throw httpError_('จำนวนสมาชิกต้องอยู่ระหว่าง 1–' + LIMITS.maxMembers + ' คน', 400);
   }
+  const raw = resolveRenewals_(given, app.applicant_name, yearBE); // ต่ออายุ via lookup: blanks keep the stored values
   const members = raw.map(function (m, i) {
     const n = i + 1;
     const age = Number(m && m.age);
@@ -206,7 +216,8 @@ function submit_(d) {
   const blobs = raw.map(function (m, i) { return photoBlob_(m && m.photo, 'ของสมาชิกคนที่ ' + (i + 1)); });
   const thumbs = raw.map(function (m, i) { return blobs[i] ? thumb_(m.thumb, 'ของสมาชิกคนที่ ' + (i + 1)) : ''; });
   members.forEach(function (m, i) {
-    if (PHOTO.requiredForNew && !blobs[i] && m.membership === 'สมัครใหม่') {
+    if (raw[i].keptPhoto) { m.photo_id_ = raw[i].keptPhoto.id; m.photo_thumb_ = raw[i].keptPhoto.thumb; }
+    if (PHOTO.requiredForNew && !blobs[i] && !m.photo_id_ && m.membership === 'สมัครใหม่') {
       throw httpError_('กรุณาแนบรูปถ่ายของสมาชิกคนที่ ' + (i + 1) + ' (สมัครใหม่)', 400);
     }
   });
@@ -231,7 +242,7 @@ function submit_(d) {
     lock.waitLock(15000);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ensureSheets_(ss);
-    const reuse = members.map(function (m, i) { return !blobs[i] && m.membership === 'ต่ออายุ'; });
+    const reuse = members.map(function (m, i) { return !blobs[i] && !m.photo_id_ && m.membership === 'ต่ออายุ'; });
     const existing = (outsiders.length || reuse.indexOf(true) >= 0) ? readObjects_(ss.getSheetByName(SHEET_MEMBERS)) : [];
 
     // ต่ออายุ without a new photo: keep the latest photo on file for the same member of the same ผู้ยื่น
@@ -323,6 +334,98 @@ function list_() {
     members: readObjects_(ss.getSheetByName(SHEET_MEMBERS)),
     serverTime: new Date().toISOString(),
   };
+}
+
+/**
+ * ต่ออายุ from the public form: the employee types their name and the application no. printed on last year's form.
+ * Both must match. Only member names (+ type, whether a photo is on file) are returned — the rest stays in the sheet
+ * and is copied on submit (renewOf), so the web form never shows ages, addresses, ฐานะ or photos.
+ */
+function renewLookup_(appIdIn, nameIn) {
+  const appId = String(appIdIn || '').trim();
+  const name = str_(nameIn, LIMITS.text, 'ชื่อ - สกุล ผู้ยื่น');
+  if (!/^\d{4}-\d{4}$/.test(appId)) throw httpError_('เลขที่ใบสมัครไม่ถูกต้อง (เช่น 2569-0012)', 400);
+  const fail = lookupGuard_(name);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheets_(ss);
+  const app = previousApp_(readObjects_(ss.getSheetByName(SHEET_APPS)), appId, name);
+  if (!app) {
+    fail();
+    throw httpError_('ไม่พบใบสมัครเลขที่ ' + appId + ' ของ ' + name + ' — ตรวจสอบชื่อและเลขที่ หรือติดต่อเจ้าหน้าที่', 404);
+  }
+  const rows = readObjects_(ss.getSheetByName(SHEET_MEMBERS));
+  // a photo is "on file" if this row has one or a later form of the same member + ผู้ยื่น does (what submit reuses)
+  const hasPhoto = function (m) {
+    return !!m.photo_id || rows.some(function (r) {
+      return r.photo_id && nameKey_(r.full_name) === nameKey_(m.full_name) && nameKey_(r.applicant_name) === nameKey_(app.applicant_name);
+    });
+  };
+  const members = rows
+    .filter(function (m) { return String(m.app_id) === appId; })
+    .sort(function (a, b) { return Number(a.seq) - Number(b.seq); })
+    .map(function (m) {
+      return { seq: Number(m.seq), full_name: m.full_name, member_type: m.member_type, has_photo: hasPhoto(m) };
+    });
+  return {
+    ok: true,
+    application: { app_id: appId, year_be: Number(app.year_be), applicant_name: app.applicant_name,
+      department: app.department, position: app.position },
+    members: members,
+  };
+}
+
+/** Rate limit for guessing (name, application no.) pairs. Returns a function that records one failure. */
+function lookupGuard_(name) {
+  const cache = CacheService.getScriptCache();
+  const key = 'rl_n_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, nameKey_(name)));
+  const count = function (k) { return Number(cache.get(k) || 0); };
+  if (count(key) >= LOOKUP.maxFailPerName || count('rl_all') >= LOOKUP.maxFailTotal) {
+    throw httpError_('ค้นหาไม่สำเร็จหลายครั้งเกินไป กรุณาลองใหม่ในอีก 1 ชั่วโมง หรือติดต่อเจ้าหน้าที่', 429);
+  }
+  return function () {
+    cache.put(key, String(count(key) + 1), LOOKUP.windowSec);
+    cache.put('rl_all', String(count('rl_all') + 1), LOOKUP.windowSec);
+  };
+}
+
+function previousApp_(apps, appId, applicantName) {
+  return apps.filter(function (a) {
+    return String(a.app_id) === appId && nameKey_(a.applicant_name) === nameKey_(applicantName);
+  })[0] || null;
+}
+
+/**
+ * Members renewed through the public lookup carry renewOf {appId, seq}. Re-check the pair against the ผู้ยื่น name,
+ * then fill whatever was left blank from the stored row (age + years passed) and remember its photo.
+ */
+function resolveRenewals_(raw, applicantName, yearBE) {
+  if (!raw.some(function (m) { return m && m.renewOf; })) return raw;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheets_(ss);
+  const apps = readObjects_(ss.getSheetByName(SHEET_APPS));
+  const rows = readObjects_(ss.getSheetByName(SHEET_MEMBERS));
+  const fail = lookupGuard_(applicantName);
+  const blank = function (v) { return v === undefined || v === null || String(v).trim() === ''; };
+  return raw.map(function (m, i) {
+    if (!m || !m.renewOf) return m;
+    const oldId = String(m.renewOf.appId || '');
+    const oldSeq = Number(m.renewOf.seq);
+    const oldApp = previousApp_(apps, oldId, applicantName);
+    if (!oldApp) {
+      fail();
+      throw httpError_('ใบสมัครเดิมเลขที่ ' + oldId + ' ไม่ตรงกับชื่อผู้ยื่น', 404);
+    }
+    const old = rows.filter(function (r) { return String(r.app_id) === oldId && Number(r.seq) === oldSeq; })[0];
+    if (!old) throw httpError_('ไม่พบสมาชิกคนที่ ' + (i + 1) + ' ในใบสมัครเดิม ' + oldId, 400);
+    const years = Math.max(0, yearBE - Number(oldApp.year_be || old.year_be));
+    return Object.assign({}, m, {
+      age: blank(m.age) ? (blank(old.age) ? '' : Number(old.age) + years) : m.age,
+      address: blank(m.address) ? old.address : m.address,
+      relationship: blank(m.relationship) ? old.relationship : m.relationship,
+      memberType: blank(m.memberType) ? old.member_type : m.memberType,
+      keptPhoto: old.photo_id ? { id: String(old.photo_id), thumb: String(old.photo_thumb || '') } : null,
+    });
+  });
 }
 
 /** Full-size photos for printing cards; only members listed in the sheet can be read. */
