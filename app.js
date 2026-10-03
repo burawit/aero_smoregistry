@@ -25,9 +25,18 @@
   const FAMILY = 'ครอบครัวพนักงาน';
   const OUTSIDER = 'บุคคลภายนอก';
   const MEMBER_TYPES = [[FAMILY, 'ครอบครัวพนักงาน (ประเภท ๒)'], [OUTSIDER, 'บุคคลภายนอก (ประเภท ๓)']];
+  const MEMBER_TYPE_CARDS = [
+    [FAMILY, 'ครอบครัวพนักงาน', `ประเภท ๒ · ค่าทำบัตร ${CFG.CARD_FEE} บาท`],
+    [OUTSIDER, 'บุคคลภายนอก', `ประเภท ๓ · ค่าบัตร ${CFG.CARD_FEE} + ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/ปี · ต้องมีพนักงานรับรอง`],
+  ];
+  const REL_OTHER = '__other';
   const isOutsider = (m) => (m.memberType || m.member_type) === OUTSIDER;
   // ฐานะ suggestions for family members (ตนเอง = ประเภท ๑ and "บุคคลภายนอก" are types, not relationships)
   const FAMILY_RELATIONSHIPS = (CFG.RELATIONSHIPS || []).filter((d) => d !== 'ตนเอง' && d !== OUTSIDER);
+  const relOptions = (m) => (isOutsider(m) ? (CFG.OUTSIDER_RELATIONSHIPS || []) : FAMILY_RELATIONSHIPS);
+  // Which chip is selected: a listed relationship, "อื่น ๆ" (free text), or nothing yet.
+  const relChoice = (m) => (m.relOther ? REL_OTHER
+    : (relOptions(m).includes(m.relationship) ? m.relationship : (m.relationship ? REL_OTHER : '')));
   // Only outsiders (ประเภท ๓) need a certifying employee (ข้อ ๖.๓).
   const certText = (seqs) => `ข้าพเจ้าเป็นพนักงาน${CFG.CERTIFIER_UNIT} ขอรับรองว่าข้อความข้างต้นของผู้สมัครประเภทบุคคลภายนอก` +
     `${seqs && seqs.length ? ` ลำดับที่ ${seqs.join(', ')}` : ''} เป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้` +
@@ -219,6 +228,86 @@
     if (name === 'registry') openRegistry();
   }
 
+  // ================================================================== PICKER (สังกัด / ตำแหน่ง)
+  // Small searchable dropdown. Native <datalist> is clumsy on iPhone, so we draw our own list.
+  function attachPicker(input, items, limit) {
+    const max = limit || 8;
+    const id = `${input.name}-picker`;
+    const wrap = document.createElement('div');
+    wrap.className = 'picker-wrap';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const list = document.createElement('ul');
+    list.id = id;
+    list.className = 'picker';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    wrap.appendChild(list);
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', id);
+    input.setAttribute('aria-expanded', 'false');
+    let matches = [];
+    let active = -1;
+
+    const close = () => {
+      list.hidden = true;
+      active = -1;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    };
+    const search = () => {
+      const q = matchKey(input.value);
+      if (!q) { close(); return; }
+      const found = items.filter((it) => it.key.includes(q));
+      found.sort((x, y) => Number(y.key.startsWith(q)) - Number(x.key.startsWith(q))); // prefix matches first
+      matches = found.slice(0, max);
+      list.innerHTML = matches.length
+        ? matches.map((it, k) => `<li id="${id}-${k}" role="option" data-k="${k}">${it.html}</li>`).join('') +
+          (found.length > max ? `<li class="picker-note">พบ ${found.length} รายการ — พิมพ์เพิ่มเพื่อกรอง</li>` : '')
+        : '<li class="picker-note">ไม่พบในรายการ — พิมพ์เองได้</li>';
+      active = -1;
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    };
+    const pick = (k) => {
+      const it = matches[k];
+      if (!it) return;
+      input.value = it.value;
+      close();
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const move = (step) => {
+      if (list.hidden || !matches.length) return;
+      active = (active + step + matches.length) % matches.length;
+      $$('[role=option]', list).forEach((li, k) => li.classList.toggle('active', k === active));
+      input.setAttribute('aria-activedescendant', `${id}-${active}`);
+      list.querySelector(`#${CSS.escape(id)}-${active}`).scrollIntoView({ block: 'nearest' });
+    };
+
+    input.addEventListener('input', search);
+    input.addEventListener('focus', () => {
+      if (input.value) search();
+      // On phones, lift the field to the top so the list isn't hidden behind the keyboard.
+      if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+        setTimeout(() => (input.closest('.field') || input).scrollIntoView({ block: 'start', behavior: 'smooth' }), 300);
+      }
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (list.hidden) search(); move(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+      else if (e.key === 'Enter' && !list.hidden && active >= 0) { e.preventDefault(); pick(active); }
+      else if (e.key === 'Escape') close();
+    });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+    list.addEventListener('pointerdown', (e) => e.preventDefault()); // keep focus (and the keyboard) on the input
+    list.addEventListener('click', (e) => {
+      e.preventDefault();
+      const li = e.target.closest('[role=option]');
+      if (li) pick(Number(li.dataset.k));
+    });
+  }
+
   // ================================================================== FORM
   const form = $('#app-form');
   let state;
@@ -233,22 +322,25 @@
       `<label><input type="radio" name="${name}" value="${esc(value)}"${value === selected ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
   }
 
+  function typeCards(name, selected) {
+    return MEMBER_TYPE_CARDS.map(([value, title, sub]) =>
+      `<label><input type="radio" name="${name}" value="${esc(value)}"${value === selected ? ' checked' : ''}>` +
+      `<span class="opt-text"><span class="opt-title">${esc(title)}</span><span class="opt-sub">${esc(sub)}</span></span></label>`).join('');
+  }
+
   function buildStatic() {
     $('#applicant-type').innerHTML = radios('applicantType', APPLICANT_TYPES.map((t) => [t, t]), 'พนักงาน');
     $('#purpose').innerHTML = radios('purpose', PURPOSES, 'สมัครใหม่');
+    attachPicker(form.department, DEPTS.map((d) => ({
+      value: deptLabel(d), key: matchKey(deptLabel(d)),
+      html: `<b>${esc(d.code)}</b> ${esc(d.name)}`,
+    })));
+    attachPicker(form.position, POSITIONS.map((p) => ({ value: p, key: matchKey(p), html: esc(p) })));
     $('#member-rules').innerHTML = `
-      <strong>ประเภทสมาชิก (ระเบียบ ข้อ ๖)</strong>
-      <ul>
-        <li><b>ครอบครัวพนักงาน (ประเภท ๒)</b> — ต้องทำบัตรสมาชิก เสียค่าจัดทำบัตร ${CFG.CARD_FEE} บาท ไม่ต้องเสียค่าสมาชิก</li>
-        <li><b>บุคคลภายนอก (ประเภท ๓)</b> — ต้องทำบัตรสมาชิก เสียค่าจัดทำบัตร ${CFG.CARD_FEE} บาท และค่าสมาชิก ${CFG.MEMBER_FEE} บาท/ปี` +
-      `${CFG.FACILITY_FEE ? ` และค่าบริการสถานที่ ${CFG.FACILITY_FEE} บาท` : ''} · ต้องมีพนักงาน${esc(CFG.CERTIFIER_UNIT)}เป็นผู้รับรอง ` +
-      `(สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อพนักงาน 1 ท่าน) · ใช้บริการได้ทุกวัน ยกเว้นวันอาทิตย์</li>
-      </ul>
-      <small>พนักงาน ลูกจ้าง และพนักงานเกษียณอายุ (ประเภท ๑) เป็นสมาชิกโดยสถานภาพ ไม่ต้องระบุชื่อตนเองในรายการนี้</small>`;
-    $('#dept-list').innerHTML = DEPTS.map((d) => `<option value="${esc(deptLabel(d))}">`).join('');
-    $('#pos-list').innerHTML = POSITIONS.map((p) => `<option value="${esc(p)}">`).join('');
-    $('#rel-list').innerHTML = FAMILY_RELATIONSHIPS.map((d) => `<option value="${esc(d)}">`).join('');
-    $('#rel-out-list').innerHTML = (CFG.OUTSIDER_RELATIONSHIPS || []).map((d) => `<option value="${esc(d)}">`).join('');
+      <p>พนักงาน ลูกจ้าง และพนักงานเกษียณอายุ (ประเภท ๑) เป็นสมาชิกโดยสถานภาพ <b>ไม่ต้องใส่ชื่อตนเอง</b></p>
+      <p>บุคคลภายนอก (ประเภท ๓) ต้องมีพนักงาน${esc(CFG.CERTIFIER_UNIT)}เป็นผู้รับรอง ` +
+      `สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อพนักงาน 1 ท่าน และใช้บริการได้ทุกวัน ยกเว้นวันอาทิตย์` +
+      `${CFG.FACILITY_FEE ? ` · ค่าบริการสถานที่ ${CFG.FACILITY_FEE} บาท/คน` : ''}</p>`;
   }
 
   function resetForm() {
@@ -282,7 +374,7 @@
         </div>
         <div class="grid">
           <fieldset class="field span-3"><legend class="label">ประเภทสมาชิก</legend>
-            <div class="seg small" data-k="memberType">${radios(`mtype-${i}`, MEMBER_TYPES, m.memberType)}</div>
+            <div class="seg cards" data-k="memberType">${typeCards(`mtype-${i}`, m.memberType)}</div>
           </fieldset>
           <label class="field span-2"><span class="label">ชื่อ - สกุล</span>
             <input data-k="fullName" value="${esc(m.fullName)}" maxlength="150" required></label>
@@ -290,9 +382,13 @@
             <input data-k="age" type="number" min="0" max="120" inputmode="numeric" value="${esc(m.age)}" required></label>
           <label class="field span-3"><span class="label">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน (ที่สามารถติดต่อได้)</span>
             <textarea data-k="address" rows="2" maxlength="400" required>${esc(m.address)}</textarea></label>
-          <label class="field span-2"><span class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น</span>
-            <input data-k="relationship" list="${isOutsider(m) ? 'rel-out-list' : 'rel-list'}" value="${esc(m.relationship)}" maxlength="150" required></label>
-          <fieldset class="field"><legend class="label">สมาชิกภาพ</legend>
+          <fieldset class="field span-3"><legend class="label">ฐานะที่เกี่ยวข้องกับผู้ยื่น</legend>
+            <div class="seg small chips" data-k="relationship">${radios(`rel-${i}`,
+              relOptions(m).map((v) => [v, v]).concat([[REL_OTHER, 'อื่น ๆ']]), relChoice(m))}</div>
+            <input data-k="relationshipOther" class="rel-other" placeholder="ระบุฐานะที่เกี่ยวข้อง" maxlength="150"
+              value="${relChoice(m) === REL_OTHER ? esc(m.relationship) : ''}"${relChoice(m) === REL_OTHER ? '' : ' hidden'}>
+          </fieldset>
+          <fieldset class="field span-3"><legend class="label">สมาชิกภาพ</legend>
             <div class="seg small" data-k="membership">${radios(`membership-${i}`, MEMBERSHIP.map((v) => [v, v]), m.membership)}</div>
           </fieldset>
         </div>
@@ -351,34 +447,45 @@
     const card = e.target.closest('.member');
     if (!card) return;
     const i = Number(card.dataset.i);
-    const k = e.target.dataset.k ||
-      (e.target.type === 'radio' ? (e.target.name.startsWith('mtype-') ? 'memberType' : 'membership') : null);
-    if (!k) return;
-    state.members[i][k] = e.target.value;
-    e.target.classList.remove('invalid');
-    if (e.target.type === 'radio') {
-      e.target.closest('.seg').classList.remove('invalid');
-      if (k === 'memberType') applyMemberType(card, e.target.value);
-      updateCountsAndFees();
-    } else if (k === 'relationship' && !state.members[i].memberType) {
-      // Typing "บุคคลภายนอก" (or a family relationship from the list) picks the type if none is chosen yet.
-      const v = e.target.value.trim();
-      const guess = v === OUTSIDER ? OUTSIDER : (FAMILY_RELATIONSHIPS.includes(v) ? FAMILY : '');
-      if (guess) {
-        state.members[i].memberType = guess;
-        card.querySelector(`input[name="mtype-${i}"][value="${guess}"]`).checked = true;
-        card.querySelector('[data-k=memberType]').classList.remove('invalid');
-        applyMemberType(card, guess);
+    const m = state.members[i];
+    const t = e.target;
+    t.classList.remove('invalid');
+    if (t.type === 'radio') {
+      t.closest('.seg').classList.remove('invalid');
+      if (e.type !== 'change') return; // radios fire input + change; handle once
+      if (t.name.startsWith('mtype-')) {
+        const before = relOptions(m);
+        m.memberType = t.value;
+        // a chip from the other type's list no longer fits (e.g. คู่สมรส → บุคคลภายนอก)
+        if (!m.relOther && before.includes(m.relationship) && !relOptions(m).includes(m.relationship)) m.relationship = '';
+        $('#applicant-type').classList.remove('invalid');
+        renderMembers();
+      } else if (t.name.startsWith('rel-')) {
+        const other = card.querySelector('[data-k=relationshipOther]');
+        if (t.value === REL_OTHER) {
+          m.relOther = true;
+          m.relationship = other.value.trim();
+          other.hidden = false;
+          other.focus();
+        } else {
+          m.relOther = false;
+          m.relationship = t.value;
+          other.hidden = true;
+          other.classList.remove('invalid');
+          if (!m.memberType && FAMILY_RELATIONSHIPS.includes(t.value)) { // picking คู่สมรส/บุตร… implies family
+            m.memberType = FAMILY;
+            renderMembers();
+          }
+        }
+      } else {
+        m.membership = t.value;
         updateCountsAndFees();
       }
+      return;
     }
-  }
-
-  function applyMemberType(card, type) {
-    const out = type === OUTSIDER;
-    card.classList.toggle('is-outsider', out);
-    card.querySelector('[data-k=relationship]').setAttribute('list', out ? 'rel-out-list' : 'rel-list');
-    $('#applicant-type').classList.remove('invalid');
+    const k = t.dataset.k;
+    if (k === 'relationshipOther') m.relationship = t.value;
+    else if (k) m[k] = t.value;
   }
 
   function onMembersClick(e) {
@@ -442,7 +549,10 @@
       if (!m.fullName) bad(f('fullName'), `กรุณากรอกชื่อ - สกุล สมาชิกลำดับที่ ${n}`);
       if (m.age === '' || !Number.isInteger(m.age) || m.age < 0 || m.age > 120) bad(f('age'), `อายุของสมาชิกลำดับที่ ${n} ไม่ถูกต้อง`);
       if (!m.address) bad(f('address'), `กรุณากรอกที่อยู่ของสมาชิกลำดับที่ ${n}`);
-      if (!m.relationship) bad(f('relationship'), `กรุณากรอกฐานะของสมาชิกลำดับที่ ${n}`);
+      if (!m.relationship) {
+        bad(relChoice(state.members[i]) === REL_OTHER ? f('relationshipOther') : f('relationship'),
+          `กรุณาเลือกฐานะของสมาชิกลำดับที่ ${n}`);
+      }
       if (!MEMBER_TYPES.some(([v]) => v === m.memberType)) bad(f('memberType'), `กรุณาเลือกประเภทสมาชิกลำดับที่ ${n}`);
       if (!MEMBERSHIP.includes(m.membership)) bad(f('membership'), `กรุณาเลือกสมาชิกภาพลำดับที่ ${n}`);
     });

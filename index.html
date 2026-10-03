@@ -70,13 +70,13 @@
               </fieldset>
               <label class="field span-3">
                 <span class="label">สังกัด</span>
-                <input name="department" list="dept-list" required maxlength="150" autocomplete="off"
+                <input name="department" required maxlength="150" autocomplete="off"
                   placeholder="เช่น ศช หรือ เชียงใหม่">
                 <small class="hint" id="dept-hint"></small>
               </label>
               <label class="field span-3">
                 <span class="label">ตำแหน่ง</span>
-                <input name="position" list="pos-list" maxlength="150" autocomplete="off"
+                <input name="position" maxlength="150" autocomplete="off"
                   placeholder="เช่น วิศวกร หรือ ผู้จัดการงาน">
                 <small class="hint" id="pos-hint"></small>
               </label>
@@ -195,10 +195,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <datalist id="dept-list"></datalist>
-    <datalist id="pos-list"></datalist>
-    <datalist id="rel-list"></datalist>
-    <datalist id="rel-out-list"></datalist>
   </div>
 
   <div id="print-root"></div>

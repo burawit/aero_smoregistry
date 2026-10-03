@@ -258,6 +258,37 @@ textarea {
   transition: border-color .15s, box-shadow .15s;
 }
 
+/* iOS Safari draws date inputs wider than their box and centres the value */
+input[type=date] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  line-height: 1.4;
+}
+
+input[type=date]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+input[type=date]::-webkit-calendar-picker-indicator {
+  opacity: .55;
+}
+
+/* Consistent select look (iOS otherwise shows a grey pill) */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 7.5l5 5 5-5' fill='none' stroke='%235b6577' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+
 textarea {
   resize: vertical;
   min-height: 64px;
@@ -330,6 +361,114 @@ textarea.invalid,
   min-height: 38px;
 }
 
+/* member type: option cards with a description line */
+.seg.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.seg.cards label {
+  align-items: flex-start;
+  padding: 10px 12px;
+}
+
+.seg.cards input {
+  flex: none;
+  margin-top: 4px;
+}
+
+.opt-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.opt-title {
+  font-weight: 600;
+}
+
+.opt-sub {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.seg label:has(input:checked) .opt-sub {
+  color: var(--primary);
+}
+
+/* ฐานะ: tap chips instead of a text box */
+.seg.chips label {
+  position: relative;
+  border-radius: 999px;
+  padding: 6px 16px;
+}
+
+.seg.chips input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.seg.chips label:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px rgba(29, 58, 110, .2);
+}
+
+.rel-other {
+  margin-top: 8px;
+}
+
+/* searchable list for สังกัด / ตำแหน่ง */
+.picker-wrap {
+  position: relative;
+}
+
+.field:has(.picker-wrap) {
+  scroll-margin-top: 12px;
+}
+
+.picker {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, .14);
+  max-height: 264px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.picker [role=option] {
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.picker [role=option]:hover,
+.picker [role=option].active {
+  background: var(--primary-soft);
+}
+
+.picker b {
+  color: var(--primary);
+  margin-right: 4px;
+}
+
+.picker-note {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .check {
   display: flex;
   gap: 10px;
@@ -378,6 +517,10 @@ textarea.invalid,
   margin-bottom: 12px;
   font-size: 14px;
   color: #2c364a;
+}
+
+.rules p {
+  margin: 2px 0;
 }
 
 .rules ul {
@@ -803,7 +946,7 @@ textarea.invalid,
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   transform: translate(-50%, 20px);
   opacity: 0;
   background: #172033;
@@ -852,8 +995,33 @@ textarea.invalid,
     font-size: 22px;
   }
 
+  .topbar {
+    position: static; /* don't pin a two-row header on small screens */
+  }
+
   .topbar-inner {
     padding: 8px 12px;
+  }
+
+  .seg:not(.chips):not(.cards) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .seg:not(.chips):not(.cards)>label:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  .seg.cards {
+    grid-template-columns: 1fr;
+  }
+
+  .member {
+    padding: 12px;
+  }
+
+  .member-tools .link-btn {
+    font-size: 13px;
   }
 
   .tabs {
