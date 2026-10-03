@@ -58,6 +58,7 @@ const LIMITS = { maxMembers: 12, text: 150, address: 400 };
 // startMonth: 1 = calendar year. Keep in sync with MEMBERSHIP_YEAR_START_MONTH in config.js.
 const MEMBERSHIP_YEAR = { startMonth: 10 };
 // Photo: required for สมัครใหม่; a ต่ออายุ member without a new photo keeps the latest photo on file (same name + ผู้ยื่น).
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const PHOTO = { requiredForNew: true, maxBytes: 600 * 1024, maxThumbChars: 30000, perRequest: 24,
   folderName: 'รูปถ่ายสมาชิก (member-registry)' };
 const FAMILY_ROWS = LIMITS.maxMembers - RULES.maxOutsidersPerCertifier; // rows 1–9
@@ -99,6 +100,11 @@ function doPost(e) {
 
 /** Run once from the editor. Safe to run again (also adds any new columns). */
 function setup() {
+  // Google's consent screen lets you untick single permissions. If Google Drive (for photos) was left unticked or never
+  // asked for, this stops here and shows the permission prompt again — tick Google Drive (or "Select all"), then run again.
+  if (typeof ScriptApp !== 'undefined' && typeof ScriptApp.requireScopes === 'function') {
+    ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, [DRIVE_SCOPE]);
+  }
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureSheets_(ss);
   const props = PropertiesService.getScriptProperties();
@@ -398,7 +404,8 @@ function photoFolder_() {
     props.setProperty('PHOTO_FOLDER_ID', folder.getId());
     return folder;
   } catch (e) {
-    throw httpError_('ระบบยังเก็บรูปถ่ายไม่ได้ — ผู้ดูแลต้องรัน setup() ใน Apps Script เพื่ออนุญาต Google Drive (' + (e.message || e) + ')', 500);
+    throw httpError_('ระบบยังเก็บรูปถ่ายไม่ได้ เพราะยังไม่ได้อนุญาต Google Drive — ผู้ดูแลเปิด Apps Script รัน setup ' +
+      'แล้วติ๊กสิทธิ์ Google Drive (หรือ "เลือกทั้งหมด") ในหน้าขออนุญาต จากนั้น Deploy เป็น New version (' + (e.message || e) + ')', 500);
   }
 }
 
