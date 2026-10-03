@@ -4,11 +4,14 @@
 
   // ------------------------------------------------------------------ config
   const CFG = Object.assign({
-    API_URL: '', MEMBER_FEE: 100, CARD_FEE: 20, CARD_FEE_ON_RENEW: false, MAX_MEMBERS: 6,
-    ADDRESSEE: 'ผศข.บภ 2.', DIRECTOR_TITLE: 'ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่',
+    API_URL: '', MEMBER_FEE: 100, CARD_FEE: 20, CARD_FEE_ON_RENEW: true, MAX_MEMBERS: 6,
+    ADDRESSEE: 'ผศช.บภ 2.', DIRECTOR_TITLE: 'ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่',
     COMPANY_NAME: 'บริษัท วิทยุการบินแห่งประเทศไทย จำกัด', DEPARTMENTS: [], RELATIONSHIPS: [],
     // ระเบียบ ส่วนที่ ๒ ข้อ ๖ — keep in sync with FEES / RULES in Code.gs
-    FACILITY_FEE: 0,                       // ค่าบริการสถานที่การกีฬา บาท/คน (บุคคลภายนอก); 0 = not collected on this form
+    FACILITY_FEE: 0,                       // ค่าบริการสนามคิดรายชั่วโมงเมื่อใช้บริการ (ข้อ ๑๖) จึงไม่เก็บในใบสมัคร
+    RULE_REF: 'ประกาศ ที่ ปก/ศช.บภ ๒-๑๘๙๙/๒๕๖๙ แนวปฏิบัติเกี่ยวกับการใช้สถานที่การกีฬาของศูนย์ควบคุมการบินเชียงใหม่ พ.ศ. ๒๕๖๙',
+    OUTSIDER_RULES: 'ใช้ได้เฉพาะสนามเทนนิสและสนามแบดมินตัน ทุกวัน ยกเว้นวันอาทิตย์ เวลา 15.30–20.30 น. ' +
+      'และชำระค่าบริการสนามเมื่อใช้ (เทนนิส 100 บาท/คน/ชม. แบดมินตัน 60 บาท/คน/ชม.)',
     MAX_OUTSIDERS: 3,                      // บุคคลภายนอกที่พนักงาน 1 ท่านรับรองได้
     OUTSIDER_CERTIFIER_TYPES: ['พนักงาน'], // ผู้ยื่นที่รับรองบุคคลภายนอกได้
     CERTIFIER_UNIT: 'ศูนย์ควบคุมการบินเชียงใหม่',
@@ -26,8 +29,8 @@
   const OUTSIDER = 'บุคคลภายนอก';
   const MEMBER_TYPES = [[FAMILY, 'ครอบครัวพนักงาน (ประเภท ๒)'], [OUTSIDER, 'บุคคลภายนอก (ประเภท ๓)']];
   const MEMBER_TYPE_CARDS = [
-    [FAMILY, 'ครอบครัวพนักงาน', `ประเภท ๒ · ค่าทำบัตร ${CFG.CARD_FEE} บาท`],
-    [OUTSIDER, 'บุคคลภายนอก', `ประเภท ๓ · ค่าบัตร ${CFG.CARD_FEE} + ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/ปี · ต้องมีพนักงานรับรอง`],
+    [FAMILY, 'ครอบครัวพนักงาน', `ประเภท ๒ · ค่าทำบัตร ${CFG.CARD_FEE} บาท/ปี · ใช้ได้ทุกสถานที่`],
+    [OUTSIDER, 'บุคคลภายนอก', `ประเภท ๓ · ค่าบัตร ${CFG.CARD_FEE} + ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/ปี · ต้องมีพนักงานรับรอง · เฉพาะเทนนิส/แบดมินตัน`],
   ];
   const REL_OTHER = '__other';
   const isOutsider = (m) => (m.memberType || m.member_type) === OUTSIDER;
@@ -42,8 +45,10 @@
     `${seqs && seqs.length ? ` ลำดับที่ ${seqs.join(', ')}` : ''} เป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้` +
     'ยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ ทุกประการ และจะไม่เรียกร้องค่าเสียหายใด ๆ ' +
     'หากเกิดอันตรายหรือบาดเจ็บขณะอยู่ในบริเวณบ้านพักรับรองหรือศูนย์กีฬาของ ' + CFG.COMPANY_NAME;
-  const USAGE_NOTE = `บุคคลภายนอกใช้บริการได้ทุกวัน ยกเว้นวันอาทิตย์ (AEROTHAI FAMILY DAY) · ` +
-    `ผู้ใช้บริการต้องแสดงบัตรประจำตัวพนักงานหรือบัตรสมาชิกต่อเจ้าหน้าที่ทุกครั้งก่อนเข้าใช้บริการ`;
+  // ข้อ ๗ / ๙.๑ (everyone) and ข้อ ๘ / ๑๒ (outsiders)
+  const CARD_NOTE = 'ผู้ใช้บริการต้องแสดงบัตรประจำตัวพนักงานหรือบัตรสมาชิกต่อเจ้าหน้าที่ทุกครั้งก่อนเข้าใช้บริการ ' +
+    'และสมาชิกประเภท ๒ และ ๓ ต้องฝากบัตรสมาชิกไว้กับเจ้าหน้าที่';
+  const usageNote = (hasOutsider) => CARD_NOTE + (hasOutsider ? ` · สมาชิกประเภท ๓ ${CFG.OUTSIDER_RULES}` : '');
   // สังกัด list: departments.js (window.APP_DEPARTMENTS, [code, name]) unless config.js sets DEPARTMENTS
   const DEPTS = ((CFG.DEPARTMENTS && CFG.DEPARTMENTS.length) ? CFG.DEPARTMENTS : (window.APP_DEPARTMENTS || []))
     .map((d) => (Array.isArray(d) ? { code: String(d[0] || '').trim(), name: String(d[1] || '').trim() } : { code: String(d || '').trim(), name: '' }))
@@ -189,7 +194,7 @@
           app_id: appId, year_be: yearBE, form_date: d.formDate, applicant_name: d.applicantName,
           applicant_type: d.applicantType, department: d.department, position: d.position, purpose: d.purpose,
           member_count: f.count, family_count: f.familyCount, outsider_count: f.outsiderCount,
-          new_count: f.newCount, renew_count: f.renewCount, photo_count: d.photoCount, doc_count: d.docCount,
+          new_count: f.newCount, renew_count: f.renewCount, photo_count: d.photoCount,
           member_fee: f.memberFee, card_fee: f.cardFee, facility_fee: f.facilityFee,
           total_fee: f.total, renewed_from: d.renewedFrom || '', created_at: createdAt,
         };
@@ -338,9 +343,10 @@
     attachPicker(form.position, POSITIONS.map((p) => ({ value: p, key: matchKey(p), html: esc(p) })));
     $('#member-rules').innerHTML = `
       <p>พนักงาน ลูกจ้าง และพนักงานเกษียณอายุ (ประเภท ๑) เป็นสมาชิกโดยสถานภาพ <b>ไม่ต้องใส่ชื่อตนเอง</b></p>
+      <p>ประเภท ๒ และ ๓ ต้องทำบัตรสมาชิก และแสดง/ฝากบัตรกับเจ้าหน้าที่ทุกครั้งก่อนเข้าใช้บริการ</p>
       <p>บุคคลภายนอก (ประเภท ๓) ต้องมีพนักงาน${esc(CFG.CERTIFIER_UNIT)}เป็นผู้รับรอง ` +
-      `สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อพนักงาน 1 ท่าน และใช้บริการได้ทุกวัน ยกเว้นวันอาทิตย์` +
-      `${CFG.FACILITY_FEE ? ` · ค่าบริการสถานที่ ${CFG.FACILITY_FEE} บาท/คน` : ''}</p>`;
+      `สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อพนักงาน 1 ท่าน · ${esc(CFG.OUTSIDER_RULES)}</p>
+      <p class="rules-ref">อ้างอิง ${esc(CFG.RULE_REF)}</p>`;
   }
 
   function resetForm() {
@@ -350,7 +356,6 @@
     form.querySelector('input[name=applicantType][value="พนักงาน"]').checked = true;
     form.querySelector('input[name=purpose][value="สมัครใหม่"]').checked = true;
     delete form.photoCount.dataset.touched;
-    delete form.docCount.dataset.touched;
     $('#renew-note').hidden = true;
     $('#form-error').hidden = true;
     $$('.invalid', form).forEach((el) => el.classList.remove('invalid'));
@@ -416,10 +421,9 @@
   function updateCountsAndFees() {
     const n = state.members.length;
     if (!form.photoCount.dataset.touched) form.photoCount.value = n * 2;
-    if (!form.docCount.dataset.touched) form.docCount.value = n;
     const f = computeFees(state.members);
     $('#fees').innerHTML = `
-      <tr><td>ค่าจัดทำบัตรสมาชิก <span class="calc">${CFG.CARD_FEE} บาท/คน × ${f.cardPeople} คน${CFG.CARD_FEE_ON_RENEW ? '' : ' (เฉพาะสมัครใหม่)'}</span></td><td>${baht(f.cardFee)} บาท</td></tr>
+      <tr><td>ค่าจัดทำบัตรสมาชิก <span class="calc">${CFG.CARD_FEE} บาท/คน/ปี × ${f.cardPeople} คน${CFG.CARD_FEE_ON_RENEW ? '' : ' (เฉพาะสมัครใหม่)'}</span></td><td>${baht(f.cardFee)} บาท</td></tr>
       <tr><td>เงินค่าสมาชิก <span class="calc">${CFG.MEMBER_FEE} บาท/คน/ปี × ${f.outsiderCount} คน (เฉพาะบุคคลภายนอก)</span></td><td>${baht(f.memberFee)} บาท</td></tr>
       ${CFG.FACILITY_FEE ? `<tr><td>ค่าบริการสถานที่การกีฬา <span class="calc">${CFG.FACILITY_FEE} บาท/คน × ${f.outsiderCount} คน (เฉพาะบุคคลภายนอก)</span></td><td>${baht(f.facilityFee)} บาท</td></tr>` : ''}
       <tr class="total"><td>รวมทั้งสิ้น</td><td>${baht(f.total)} บาท</td></tr>`;
@@ -523,7 +527,6 @@
       position: canonicalPosition(form.position.value),
       purpose: checked('purpose'),
       photoCount: int(form.photoCount.value),
-      docCount: int(form.docCount.value),
       renewedFrom: state.renewedFrom || '',
       members: state.members.map((m) => ({
         fullName: String(m.fullName).trim(), age: int(m.age), address: String(m.address).trim(),
@@ -560,7 +563,7 @@
     const ruleErr = outsiderRuleError(d.applicantType, outsiderCount);
     if (ruleErr && !CFG.OUTSIDER_CERTIFIER_TYPES.includes(d.applicantType)) bad($('#applicant-type'), ruleErr);
     else if (ruleErr) errors.push({ el: $('#members'), msg: ruleErr });
-    [['photoCount', 'จำนวนรูปถ่าย'], ['docCount', 'จำนวนสำเนาเอกสาร']].forEach(([k, label]) => {
+    [['photoCount', 'จำนวนรูปถ่าย']].forEach(([k, label]) => {
       if (!Number.isInteger(d[k]) || d[k] < 0 || d[k] > 100) bad(form[k], `${label}ไม่ถูกต้อง`);
     });
     if (outsiderCount && !d.agree) bad(form.agree.closest('.check'), 'กรุณาติ๊กคำรับรองสำหรับบุคคลภายนอก');
@@ -662,19 +665,20 @@
     const outSeqs = ms.filter(isOutsider).map((m) => m.seq);
     const rows = Array.from({ length: CFG.MAX_MEMBERS }, (_, i) => {
       const m = ms[i];
-      const opts = [[FAMILY, 'ครอบครัว'], [OUTSIDER, 'บุคคลภายนอก']]
-        .map(([v, l]) => `<span class="opt">${box(m && m.member_type === v)}${l}</span>`).join('') +
-        '<span class="sep"></span>' +
-        MEMBERSHIP.map((v) => `<span class="opt">${box(m && m.membership === v)}${v}</span>`).join('');
+      const types = [[FAMILY, 'ครอบครัว'], [OUTSIDER, 'บุคคลภายนอก']]
+        .map(([v, l]) => `<span class="opt">${box(m && m.member_type === v)}${l}</span>`).join('');
+      const rel = `<span class="sep"></span><span class="val">${m ? esc(m.relationship) : ''}</span>`;
+      const opts = MEMBERSHIP.map((v) => `<span class="opt">${box(m && m.membership === v)}${v}</span>`).join('');
       return m
         ? `<tr><td class="c">${i + 1}.</td><td class="val">${esc(m.full_name)}</td><td class="c val">${esc(m.age)}</td>
-             <td class="val">${esc(m.address)}</td><td class="val">${esc(m.relationship)}</td><td>${opts}</td><td></td></tr>`
-        : `<tr><td class="c">${i + 1}.</td><td></td><td></td><td></td><td></td><td>${opts}</td><td></td></tr>`;
+             <td class="val">${esc(m.address)}</td><td>${types}${rel}</td><td>${opts}</td><td></td></tr>`
+        : `<tr><td class="c">${i + 1}.</td><td></td><td></td><td></td><td>${types}${rel}</td><td>${opts}</td><td></td></tr>`;
     }).join('');
 
     const page1 = `
       <section class="pf-page">
         <div class="pf-title">ใบสมัครสมาชิกวิทยุการบิน</div>
+        <div class="pf-subtitle">ตาม${esc(CFG.RULE_REF)}</div>
         <div class="pf-top">
           <div class="pf-top-left">
             <div class="pf-row">วันที่ ${fill(p.d, '14mm')} เดือน ${fill(TH_MONTHS[p.m - 1], '32mm')} พ.ศ. ${fill(p.y ? p.y + 543 : '', '18mm')}</div>
@@ -691,9 +695,9 @@
         <div class="pf-row pf-indent1">${PURPOSES.map(([v, l]) => `<span class="pf-opt">${box(app.purpose === v)}${l}</span>`).join('')}</div>
         <div class="pf-row">(โปรดระบุรายละเอียดผู้เป็นสมาชิก)</div>
         <table class="pf-members">
-          <colgroup><col style="width:7%"><col style="width:20%"><col style="width:7%"><col style="width:23%"><col style="width:13%"><col style="width:17%"><col style="width:13%"></colgroup>
+          <colgroup><col style="width:7%"><col style="width:20%"><col style="width:7%"><col style="width:23%"><col style="width:17%"><col style="width:13%"><col style="width:13%"></colgroup>
           <thead><tr><th>ลำดับ</th><th>ชื่อ - สกุล</th><th>อายุ</th><th>สถานที่อยู่อาศัย /<br>ทำงานในปัจจุบัน<br>(ที่สามารถติดต่อได้)</th>
-            <th>ฐานะที่<br>เกี่ยวข้อง<br>กับผู้ยื่น</th><th>ประเภท /<br>สมาชิกภาพ</th><th>ลายมือชื่อ<br>ผู้สมัคร</th></tr></thead>
+            <th>ประเภท /<br>ฐานะที่เกี่ยวข้อง<br>กับผู้ยื่น</th><th>สมาชิกภาพ</th><th>ลายมือชื่อ<br>ผู้สมัคร</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
         ${foot(1)}
@@ -702,16 +706,15 @@
     const page2 = `
       <section class="pf-page">
         ${outSeqs.length ? `<div class="pf-h2">คำรับรองของพนักงานผู้รับรอง (สมาชิกประเภทที่ ๓ บุคคลภายนอก)</div>
-        <p class="pf-cert">${esc(certText(outSeqs))}</p>` : '<div class="pf-h2">เอกสารประกอบการสมัคร</div>'}
-        <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบเอกสารหลักฐานในการสมัครเป็นสมาชิก มาดังนี้</p>
+        <p class="pf-cert">${esc(certText(outSeqs))}</p>` : '<div class="pf-h2">รูปถ่ายและค่าธรรมเนียม</div>'}
+        <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบรูปถ่ายและค่าธรรมเนียมในการสมัครเป็นสมาชิก มาดังนี้</p>
         <table class="pf-attach">
           <tr><td class="n">1.</td><td>รูปถ่ายขนาด 1 นิ้ว หน้าตรง ไม่สวมหมวก ของผู้สมัครคนละ 2 รูป</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} ใบ</td></tr>
-          <tr><td class="n">2.</td><td>สำเนาทะเบียนบ้าน / บัตรประจำตัวประชาชน / บัตรประจำตัวพนักงาน ของผู้สมัครแต่ละคน</td><td class="amt">จำนวน ${fill(app.doc_count, '26mm')} ใบ</td></tr>
-          <tr><td class="n">3.</td><td>เงินค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะบุคคลภายนอก)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
-          <tr><td class="n">4.</td><td>ค่าบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน (ครอบครัวพนักงานและบุคคลภายนอก)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
-          ${Number(app.facility_fee) ? `<tr><td class="n">5.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะบุคคลภายนอก)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
+          <tr><td class="n">2.</td><td>ค่าจัดทำบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน/ปี (สมาชิกประเภท ๒ และ ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
+          <tr><td class="n">3.</td><td>ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
+          ${Number(app.facility_fee) ? `<tr><td class="n">4.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
         </table>
-        ${outSeqs.length ? `<p class="pf-note">หมายเหตุ: ${esc(USAGE_NOTE)}</p>` : ''}
+        <p class="pf-note">หมายเหตุ: ${esc(usageNote(outSeqs.length > 0))}</p>
         <div class="pf-sign">
           <div class="pf-row">ลายมือชื่อ ${fill('', '', 'grow')}</div>
           <div class="pf-row">ตำแหน่ง ${fill(app.position, '', 'grow')}</div>
@@ -958,7 +961,7 @@
     });
     form.addEventListener('input', (e) => {
       $('#form-error').hidden = true;
-      if (e.target === form.photoCount || e.target === form.docCount) e.target.dataset.touched = '1';
+      if (e.target === form.photoCount) e.target.dataset.touched = '1';
       if (!e.target.closest('.member')) {
         e.target.classList.remove('invalid');
         const seg = e.target.closest('.seg, .check');

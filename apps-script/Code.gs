@@ -12,10 +12,11 @@
  *   { action: "submit", data: {...} }            → public: save one application
  *   { action: "list",   key: "<ADMIN_KEY>" }     → staff: all applications + members
  *
- * Member types (ระเบียบ ส่วนที่ ๒ ข้อ ๖)
+ * Rules: ประกาศ ที่ ปก/ศช.บภ ๒-๑๘๙๙/๒๕๖๙ (แนวปฏิบัติเกี่ยวกับการใช้สถานที่การกีฬาของศูนย์ควบคุมการบินเชียงใหม่ พ.ศ. ๒๕๖๙)
+ * Member types (ส่วนที่ ๒ ข้อ ๖)
  *   ประเภท ๑ พนักงาน/ลูกจ้าง/พนักงานเกษียณอายุ — member by status, not listed on the form, no fees
- *   ประเภท ๒ ครอบครัวพนักงาน — card required: card fee only
- *   ประเภท ๓ บุคคลภายนอก   — card fee + membership fee (+ facility fee); must be certified by a
+ *   ประเภท ๒ ครอบครัวพนักงาน — card required: card fee 20 บาท/คน/ปี only
+ *   ประเภท ๓ บุคคลภายนอก   — card fee + membership fee 100 บาท/คน/ปี; court fees are paid per use; certified by a
  *                             พนักงานศูนย์ควบคุมการบินเชียงใหม่, max 3 outsiders per certifier
  */
 
@@ -26,7 +27,7 @@ const SHEET_MEMBERS = 'Members';
 const APP_HEADERS = [
   'app_id', 'year_be', 'form_date', 'applicant_name', 'applicant_type', 'department', 'position',
   'purpose', 'member_count', 'family_count', 'outsider_count', 'new_count', 'renew_count',
-  'photo_count', 'doc_count', 'member_fee', 'card_fee', 'facility_fee', 'total_fee',
+  'photo_count', 'member_fee', 'card_fee', 'facility_fee', 'total_fee',
   'renewed_from', 'created_at',
 ];
 const MEMBER_HEADERS = [
@@ -36,10 +37,10 @@ const MEMBER_HEADERS = [
 
 // Keep these in sync with config.js
 const FEES = {
-  member: 100,        // ค่าสมาชิก บาท/คน/ปี — บุคคลภายนอกเท่านั้น
-  card: 20,           // ค่าจัดทำบัตรสมาชิก บาท/คน — ครอบครัวและบุคคลภายนอก
-  facility: 0,        // ค่าบริการสถานที่การกีฬา บาท/คน — บุคคลภายนอกเท่านั้น (0 = not collected on this form)
-  cardOnRenew: false, // false = card fee only for "สมัครใหม่"
+  member: 100,        // ค่าสมาชิก บาท/คน/ปี — บุคคลภายนอกเท่านั้น (ข้อ ๑๖)
+  card: 20,           // ค่าจัดทำบัตรสมาชิก บาท/คน/ปี — ครอบครัวและบุคคลภายนอก (ข้อ ๑๖)
+  facility: 0,        // ค่าบริการสนามคิดรายชั่วโมงเมื่อใช้บริการ จึงไม่เก็บในใบสมัคร
+  cardOnRenew: true,  // ข้อ ๑๖: ค่าจัดทำบัตร "/คน/ปี" → charged on renewals too
 };
 const RULES = {
   maxOutsidersPerCertifier: 3,         // ข้อ ๖.๓: per certifier per membership year
@@ -142,7 +143,6 @@ function submit_(d) {
 
   const fees = computeFees_(members);
   const photo = count_(d.photoCount, members.length * 2);
-  const docs = count_(d.docCount, members.length);
   const createdAt = new Date();
 
   const lock = LockService.getScriptLock();
@@ -178,7 +178,7 @@ function submit_(d) {
     const appRow = Object.assign({
       app_id: appId, year_be: yearBE, form_date: formDate,
       member_count: members.length, family_count: fees.familyCount, outsider_count: fees.outsiderCount,
-      new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo, doc_count: docs,
+      new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo,
       member_fee: fees.memberFee, card_fee: fees.cardFee, facility_fee: fees.facilityFee, total_fee: fees.total,
       created_at: createdAt,
     }, app);
@@ -194,7 +194,7 @@ function submit_(d) {
 
   const application = Object.assign({ app_id: appId, year_be: yearBE, form_date: formDate,
     member_count: members.length, family_count: fees.familyCount, outsider_count: fees.outsiderCount,
-    new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo, doc_count: docs,
+    new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo,
     member_fee: fees.memberFee, card_fee: fees.cardFee, facility_fee: fees.facilityFee,
     total_fee: fees.total, created_at: createdAt.toISOString() }, app);
   return {

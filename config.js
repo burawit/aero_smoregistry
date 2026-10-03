@@ -7,12 +7,12 @@ window.APP_CONFIG = {
   // Fees — keep in sync with FEES in apps-script/Code.gs
   MEMBER_FEE: 100,          // บาท/คน/ปี
   CARD_FEE: 20,             // บาท/คน
-  CARD_FEE_ON_RENEW: false, // false = card fee only for "สมัครใหม่"
+  CARD_FEE_ON_RENEW: true,  // ประกาศ ข้อ ๑๖: ค่าจัดทำบัตร 20 บาท/คน/ปี → ต่ออายุก็เสีย
 
   MAX_MEMBERS: 3,
 
   // Printed on the staff section of the form
-  ADDRESSEE: "ผศข.บภ 2.",
+  ADDRESSEE: "ผศช.บภ 2.",
   DIRECTOR_TITLE: "ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่",
   COMPANY_NAME: "บริษัท วิทยุการบินแห่งประเทศไทย จำกัด",
 
