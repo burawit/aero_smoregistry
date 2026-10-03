@@ -4,7 +4,7 @@
 
   // ------------------------------------------------------------------ config
   const CFG = Object.assign({
-    API_URL: '', MEMBER_FEE: 100, CARD_FEE: 20, CARD_FEE_ON_RENEW: true, MAX_MEMBERS: 6,
+    API_URL: '', MEMBER_FEE: 100, CARD_FEE: 20, CARD_FEE_ON_RENEW: true, MAX_MEMBERS: 12,
     ADDRESSEE: 'ผศช.บภ 2.', DIRECTOR_TITLE: 'ผู้อำนวยการศูนย์ควบคุมการบินเชียงใหม่',
     COMPANY_NAME: 'บริษัท วิทยุการบินแห่งประเทศไทย จำกัด', DEPARTMENTS: [], RELATIONSHIPS: [],
     // ระเบียบ ส่วนที่ ๒ ข้อ ๖ — keep in sync with FEES / RULES in Code.gs
@@ -13,13 +13,11 @@
     OUTSIDER_RULES: 'ใช้ได้เฉพาะสนามเทนนิสและสนามแบดมินตัน ทุกวัน ยกเว้นวันอาทิตย์ เวลา 15.30–20.30 น. ' +
       'และชำระค่าบริการสนามเมื่อใช้ (เทนนิส 100 บาท/คน/ชม. แบดมินตัน 60 บาท/คน/ชม.)',
     MAX_OUTSIDERS: 3,                      // บุคคลภายนอกที่พนักงาน 1 ท่านรับรองได้
-    OUTSIDER_CERTIFIER_TYPES: ['พนักงาน'], // ผู้ยื่นที่รับรองบุคคลภายนอกได้
     CERTIFIER_UNIT: 'ศูนย์ควบคุมการบินเชียงใหม่',
     OUTSIDER_RELATIONSHIPS: ['เพื่อน', 'เพื่อนร่วมงาน', 'คนรู้จัก'],
   }, window.APP_CONFIG || {});
   const DEMO = !CFG.API_URL;
 
-  const APPLICANT_TYPES = ['พนักงาน', 'ลูกจ้าง', 'พนักงานเกษียณอายุ'];
   const MEMBERSHIP = ['สมัครใหม่', 'ต่ออายุ'];
   const PURPOSES = [['สมัครใหม่', 'สมัครเข้าเป็นสมาชิกใหม่'], ['ต่ออายุ', 'ต่ออายุสมาชิก']];
   const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -41,8 +39,8 @@
   const relChoice = (m) => (m.relOther ? REL_OTHER
     : (relOptions(m).includes(m.relationship) ? m.relationship : (m.relationship ? REL_OTHER : '')));
   // Only outsiders (ประเภท ๓) need a certifying employee (ข้อ ๖.๓).
-  const certText = (seqs) => `ข้าพเจ้าเป็นพนักงาน${CFG.CERTIFIER_UNIT} ขอรับรองว่าข้อความข้างต้นของผู้สมัครประเภทบุคคลภายนอก` +
-    `${seqs && seqs.length ? ` ลำดับที่ ${seqs.join(', ')}` : ''} เป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้` +
+  const certText = (who) => `ข้าพเจ้าเป็นพนักงาน${CFG.CERTIFIER_UNIT} ขอรับรองว่าข้อความข้างต้นของผู้สมัครประเภทบุคคลภายนอก` +
+    `${who ? ` ${who}` : ''} เป็นความจริง โดยผู้สมัครที่ข้าพเจ้านำมาสมัครนี้` +
     'ยินดีปฏิบัติตามระเบียบข้อบังคับของบริษัทฯ ทุกประการ และจะไม่เรียกร้องค่าเสียหายใด ๆ ' +
     'หากเกิดอันตรายหรือบาดเจ็บขณะอยู่ในบริเวณบ้านพักรับรองหรือศูนย์กีฬาของ ' + CFG.COMPANY_NAME;
   // ข้อ ๗ / ๙.๑ (everyone) and ข้อ ๘ / ๑๒ (outsiders)
@@ -128,14 +126,22 @@
     };
   }
 
-  // Same outsider rules as Code.gs (the server re-checks across all applications).
-  function outsiderRuleError(applicantType, outsiderCount) {
-    if (!outsiderCount) return '';
-    if (!CFG.OUTSIDER_CERTIFIER_TYPES.includes(applicantType)) {
-      return `สมาชิกประเภทบุคคลภายนอกต้องมี${CFG.OUTSIDER_CERTIFIER_TYPES.join('/')}${CFG.CERTIFIER_UNIT}เป็นผู้รับรองและยื่นสมัคร`;
-    }
-    if (outsiderCount > CFG.MAX_OUTSIDERS) return `พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ${CFG.MAX_OUTSIDERS} คน`;
-    return '';
+  // The form has MAX_MEMBERS rows: ครอบครัว first, then MAX_OUTSIDERS rows for บุคคลภายนอก (ข้อ ๖.๓).
+  const FAMILY_ROWS = Math.max(0, CFG.MAX_MEMBERS - CFG.MAX_OUTSIDERS);
+
+  // Same limits as Code.gs (the server also counts outsiders across all applications of the year).
+  function countRuleErrors(familyCount, outsiderCount) {
+    const errs = [];
+    if (outsiderCount > CFG.MAX_OUTSIDERS) errs.push(`พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ${CFG.MAX_OUTSIDERS} คน`);
+    if (familyCount > FAMILY_ROWS) errs.push(`ครอบครัวพนักงานกรอกได้สูงสุด ${FAMILY_ROWS} คนต่อใบสมัคร`);
+    return errs;
+  }
+
+  // Row numbers on the form: ครอบครัว 1..FAMILY_ROWS, บุคคลภายนอก FAMILY_ROWS+1.. (kept in input order)
+  function formRows(list) {
+    let fam = 0;
+    let out = 0;
+    return list.map((m) => (isOutsider(m) ? FAMILY_ROWS + (++out) : ++fam));
   }
 
   // ------------------------------------------------------------------ API
@@ -174,8 +180,8 @@
         const db = load();
         const yearBE = parts(d.formDate).y + 543;
         const outs = d.members.filter(isOutsider);
-        const ruleErr = outsiderRuleError(d.applicantType, outs.length);
-        if (ruleErr) throw new Error(ruleErr);
+        const ruleErrs = countRuleErrors(d.members.length - outs.length, outs.length);
+        if (ruleErrs.length) throw new Error(ruleErrs[0]);
         if (outs.length) {
           const key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
           const already = new Set(db.members.filter((r) => r.member_type === OUTSIDER && r.year_be === yearBE &&
@@ -198,8 +204,9 @@
           member_fee: f.memberFee, card_fee: f.cardFee, facility_fee: f.facilityFee,
           total_fee: f.total, renewed_from: d.renewedFrom || '', created_at: createdAt,
         };
+        const rowNo = formRows(d.members);
         const members = d.members.map((m, i) => ({
-          app_id: appId, seq: i + 1, full_name: m.fullName, age: m.age, address: m.address,
+          app_id: appId, seq: rowNo[i], full_name: m.fullName, age: m.age, address: m.address,
           relationship: m.relationship, member_type: m.memberType, membership: m.membership, year_be: yearBE,
           applicant_name: d.applicantName, department: d.department, created_at: createdAt,
         }));
@@ -334,7 +341,6 @@
   }
 
   function buildStatic() {
-    $('#applicant-type').innerHTML = radios('applicantType', APPLICANT_TYPES.map((t) => [t, t]), 'พนักงาน');
     $('#purpose').innerHTML = radios('purpose', PURPOSES, 'สมัครใหม่');
     attachPicker(form.department, DEPTS.map((d) => ({
       value: deptLabel(d), key: matchKey(deptLabel(d)),
@@ -353,7 +359,6 @@
     form.reset();
     state = { members: [blankMember()], renewedFrom: '' };
     form.formDate.value = todayISO();
-    form.querySelector('input[name=applicantType][value="พนักงาน"]').checked = true;
     form.querySelector('input[name=purpose][value="สมัครใหม่"]').checked = true;
     delete form.photoCount.dataset.touched;
     $('#renew-note').hidden = true;
@@ -371,7 +376,7 @@
       <div class="member${isOutsider(m) ? ' is-outsider' : ''}" data-i="${i}">
         <div class="member-head">
           <span class="member-no">${i + 1}</span>
-          <span class="member-label">สมาชิกลำดับที่ ${i + 1}</span>
+          <span class="member-label">สมาชิกคนที่ ${i + 1}</span>
           <div class="member-tools">
             ${i > 0 ? '<button type="button" class="link-btn" data-act="copy-address">ใช้ที่อยู่เดียวกับลำดับที่ 1</button>' : ''}
             ${state.members.length > 1 ? `<button type="button" class="icon-btn" data-act="remove" aria-label="ลบสมาชิกลำดับที่ ${i + 1}">&times;</button>` : ''}
@@ -427,24 +432,20 @@
       <tr><td>เงินค่าสมาชิก <span class="calc">${CFG.MEMBER_FEE} บาท/คน/ปี × ${f.outsiderCount} คน (เฉพาะบุคคลภายนอก)</span></td><td>${baht(f.memberFee)} บาท</td></tr>
       ${CFG.FACILITY_FEE ? `<tr><td>ค่าบริการสถานที่การกีฬา <span class="calc">${CFG.FACILITY_FEE} บาท/คน × ${f.outsiderCount} คน (เฉพาะบุคคลภายนอก)</span></td><td>${baht(f.facilityFee)} บาท</td></tr>` : ''}
       <tr class="total"><td>รวมทั้งสิ้น</td><td>${baht(f.total)} บาท</td></tr>`;
-    $('#member-count').textContent = `${n} / ${CFG.MAX_MEMBERS} คน` +
-      (f.outsiderCount ? ` · บุคคลภายนอก ${f.outsiderCount}/${CFG.MAX_OUTSIDERS}` : '');
-    // คำรับรอง is only for outsiders (ข้อ ๖.๓)
-    const seqs = state.members.map((m, i) => (isOutsider(m) ? i + 1 : 0)).filter(Boolean);
-    $('#cert-card').hidden = !seqs.length;
-    $('#cert-text').textContent = certText(seqs);
-    if (!seqs.length) form.agree.checked = false;
-    updateTypeHint();
+    const pill = $('#member-count');
+    pill.textContent = `${n} / ${CFG.MAX_MEMBERS} คน · ครอบครัว ${f.familyCount}/${FAMILY_ROWS} · ` +
+      `บุคคลภายนอก ${f.outsiderCount}/${CFG.MAX_OUTSIDERS}`;
+    pill.classList.toggle('over', countRuleErrors(f.familyCount, f.outsiderCount).length > 0);
+    updateCert();
   }
 
-  // Warn early when the chosen ประเภทผู้ยื่น cannot certify outsiders.
-  function updateTypeHint() {
-    const type = (form.querySelector('input[name=applicantType]:checked') || {}).value || '';
-    const hasOut = state.members.some(isOutsider);
-    const hint = $('#type-hint');
-    const msg = hasOut && !CFG.OUTSIDER_CERTIFIER_TYPES.includes(type) ? outsiderRuleError(type, 1) : '';
-    hint.textContent = msg;
-    hint.hidden = !msg;
+  // คำรับรอง is only for outsiders (ข้อ ๖.๓)
+  function updateCert() {
+    const outs = state.members.filter(isOutsider);
+    $('#cert-card').hidden = !outs.length;
+    const names = outs.map((m) => String(m.fullName || '').trim()).filter(Boolean);
+    $('#cert-text').textContent = certText(names.length ? `ได้แก่ ${names.join(', ')}` : '');
+    if (!outs.length) form.agree.checked = false;
   }
 
   function onMembersInput(e) {
@@ -462,7 +463,6 @@
         m.memberType = t.value;
         // a chip from the other type's list no longer fits (e.g. คู่สมรส → บุคคลภายนอก)
         if (!m.relOther && before.includes(m.relationship) && !relOptions(m).includes(m.relationship)) m.relationship = '';
-        $('#applicant-type').classList.remove('invalid');
         renderMembers();
       } else if (t.name.startsWith('rel-')) {
         const other = card.querySelector('[data-k=relationshipOther]');
@@ -490,6 +490,7 @@
     const k = t.dataset.k;
     if (k === 'relationshipOther') m.relationship = t.value;
     else if (k) m[k] = t.value;
+    if (k === 'fullName' && isOutsider(m)) updateCert();
   }
 
   function onMembersClick(e) {
@@ -522,7 +523,7 @@
     return {
       formDate: form.formDate.value,
       applicantName: form.applicantName.value.trim(),
-      applicantType: checked('applicantType'),
+      applicantType: '',
       department: canonicalDept(form.department.value),
       position: canonicalPosition(form.position.value),
       purpose: checked('purpose'),
@@ -542,7 +543,6 @@
     const bad = (el, msg) => { if (el) el.classList.add('invalid'); errors.push({ el, msg }); };
     if (!parts(d.formDate)) bad(form.formDate, 'กรุณาระบุวันที่ยื่น');
     if (!d.applicantName) bad(form.applicantName, 'กรุณากรอกชื่อ - สกุล ผู้ยื่น');
-    if (!d.applicantType) bad($('#applicant-type'), 'กรุณาเลือกประเภทผู้ยื่น');
     if (!d.department) bad(form.department, 'กรุณากรอกสังกัด');
     if (!d.purpose) bad($('#purpose'), 'กรุณาเลือกความประสงค์');
     d.members.forEach((m, i) => {
@@ -560,9 +560,8 @@
       if (!MEMBERSHIP.includes(m.membership)) bad(f('membership'), `กรุณาเลือกสมาชิกภาพลำดับที่ ${n}`);
     });
     const outsiderCount = d.members.filter(isOutsider).length;
-    const ruleErr = outsiderRuleError(d.applicantType, outsiderCount);
-    if (ruleErr && !CFG.OUTSIDER_CERTIFIER_TYPES.includes(d.applicantType)) bad($('#applicant-type'), ruleErr);
-    else if (ruleErr) errors.push({ el: $('#members'), msg: ruleErr });
+    countRuleErrors(d.members.length - outsiderCount, outsiderCount)
+      .forEach((msg) => errors.push({ el: $('#members'), msg }));
     [['photoCount', 'จำนวนรูปถ่าย']].forEach(([k, label]) => {
       if (!Number.isInteger(d[k]) || d[k] < 0 || d[k] > 100) bad(form[k], `${label}ไม่ถูกต้อง`);
     });
@@ -629,8 +628,6 @@
     const diff = Math.max(0, curYearBE() - Number(app.year_be));
     startNewForm();
     form.applicantName.value = app.applicant_name || '';
-    const t = form.querySelector(`input[name=applicantType][value="${app.applicant_type}"]`);
-    if (t) t.checked = true;
     form.department.value = canonicalDept(app.department);
     updateDeptHint();
     form.position.value = canonicalPosition(app.position);
@@ -662,18 +659,22 @@
     const p = parts(app.form_date) || { d: '', m: 1, y: '' };
     const ms = members.slice().sort((a, b) => a.seq - b.seq);
     const foot = (n) => `<div class="pf-foot"><span>ใบสมัครสมาชิกวิทยุการบิน (ปรับปรุง พ.ศ. 2569) · เลขที่ ${esc(app.app_id)}</span><span>หน้า ${n} / 2</span></div>`;
-    const outSeqs = ms.filter(isOutsider).map((m) => m.seq);
-    const rows = Array.from({ length: CFG.MAX_MEMBERS }, (_, i) => {
-      const m = ms[i];
-      const types = [[FAMILY, 'ครอบครัว'], [OUTSIDER, 'บุคคลภายนอก']]
-        .map(([v, l]) => `<span class="opt">${box(m && m.member_type === v)}${l}</span>`).join('');
-      const rel = `<span class="sep"></span><span class="val">${m ? esc(m.relationship) : ''}</span>`;
-      const opts = MEMBERSHIP.map((v) => `<span class="opt">${box(m && m.membership === v)}${v}</span>`).join('');
-      return m
-        ? `<tr><td class="c">${i + 1}.</td><td class="val">${esc(m.full_name)}</td><td class="c val">${esc(m.age)}</td>
-             <td class="val">${esc(m.address)}</td><td>${types}${rel}</td><td>${opts}</td><td></td></tr>`
-        : `<tr><td class="c">${i + 1}.</td><td></td><td></td><td></td><td>${types}${rel}</td><td>${opts}</td><td></td></tr>`;
-    }).join('');
+    // place people by section (works for old records whose seq predates the section layout)
+    const fam = ms.filter((m) => !isOutsider(m)).slice(0, FAMILY_ROWS);
+    const outs = ms.filter(isOutsider).slice(0, CFG.MAX_OUTSIDERS);
+    const outRows = outs.map((_, k) => FAMILY_ROWS + k + 1);
+    const cell = (v, cls) => `<td class="${cls || ''}"><div class="cell">${esc(v)}</div></td>`;
+    const row = (no, m) => (m
+      ? `<tr><td class="c">${no}.</td>${cell(m.full_name, 'val')}${cell(m.age, 'c val')}${cell(m.address, 'val')}` +
+        `${cell(m.relationship, 'val')}<td class="c">${box(m.membership === 'สมัครใหม่')}</td>` +
+        `<td class="c">${box(m.membership === 'ต่ออายุ')}</td><td></td></tr>`
+      : `<tr><td class="c">${no}.</td><td></td><td></td><td></td><td></td><td class="c">${box()}</td><td class="c">${box()}</td><td></td></tr>`);
+    const rows =
+      `<tr class="sect"><td colspan="8">ประเภท ๒ ครอบครัวพนักงาน — ค่าจัดทำบัตร ${CFG.CARD_FEE} บาท/คน/ปี</td></tr>` +
+      Array.from({ length: FAMILY_ROWS }, (_, i) => row(i + 1, fam[i])).join('') +
+      `<tr class="sect"><td colspan="8">ประเภท ๓ บุคคลภายนอก (ไม่เกิน ${CFG.MAX_OUTSIDERS} คน ต้องมีพนักงานรับรอง) — ` +
+      `ค่าจัดทำบัตร ${CFG.CARD_FEE} + ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี</td></tr>` +
+      Array.from({ length: CFG.MAX_OUTSIDERS }, (_, k) => row(FAMILY_ROWS + k + 1, outs[k])).join('');
 
     const page1 = `
       <section class="pf-page">
@@ -683,7 +684,6 @@
           <div class="pf-top-left">
             <div class="pf-row">วันที่ ${fill(p.d, '14mm')} เดือน ${fill(TH_MONTHS[p.m - 1], '32mm')} พ.ศ. ${fill(p.y ? p.y + 543 : '', '18mm')}</div>
             <div class="pf-row">ชื่อ - สกุล ${fill(app.applicant_name, '', 'grow')}</div>
-            <div class="pf-row">${APPLICANT_TYPES.map((t) => `<span class="pf-opt">${box(app.applicant_type === t)}${t}</span>`).join('')}</div>
             <div class="pf-row">สังกัด ${fill(app.department, '', 'grow')}</div>
           </div>
           <table class="pf-staffbox">
@@ -695,9 +695,11 @@
         <div class="pf-row pf-indent1">${PURPOSES.map(([v, l]) => `<span class="pf-opt">${box(app.purpose === v)}${l}</span>`).join('')}</div>
         <div class="pf-row">(โปรดระบุรายละเอียดผู้เป็นสมาชิก)</div>
         <table class="pf-members">
-          <colgroup><col style="width:7%"><col style="width:20%"><col style="width:7%"><col style="width:23%"><col style="width:17%"><col style="width:13%"><col style="width:13%"></colgroup>
-          <thead><tr><th>ลำดับ</th><th>ชื่อ - สกุล</th><th>อายุ</th><th>สถานที่อยู่อาศัย /<br>ทำงานในปัจจุบัน<br>(ที่สามารถติดต่อได้)</th>
-            <th>ประเภท /<br>ฐานะที่เกี่ยวข้อง<br>กับผู้ยื่น</th><th>สมาชิกภาพ</th><th>ลายมือชื่อ<br>ผู้สมัคร</th></tr></thead>
+          <colgroup><col style="width:6%"><col style="width:23%"><col style="width:6%"><col style="width:29%"><col style="width:12%"><col style="width:6%"><col style="width:6%"><col style="width:12%"></colgroup>
+          <thead><tr><th rowspan="2">ลำดับ</th><th rowspan="2">ชื่อ - สกุล</th><th rowspan="2">อายุ</th>
+            <th rowspan="2">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน<br>(ที่สามารถติดต่อได้)</th><th rowspan="2">ฐานะที่เกี่ยวข้อง<br>กับผู้ยื่น</th>
+            <th colspan="2">สมาชิกภาพ</th><th rowspan="2">ลายมือชื่อ<br>ผู้สมัคร</th></tr>
+            <tr><th class="sm">สมัคร<br>ใหม่</th><th class="sm">ต่อ<br>อายุ</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
         ${foot(1)}
@@ -705,8 +707,8 @@
 
     const page2 = `
       <section class="pf-page">
-        ${outSeqs.length ? `<div class="pf-h2">คำรับรองของพนักงานผู้รับรอง (สมาชิกประเภทที่ ๓ บุคคลภายนอก)</div>
-        <p class="pf-cert">${esc(certText(outSeqs))}</p>` : '<div class="pf-h2">รูปถ่ายและค่าธรรมเนียม</div>'}
+        ${outRows.length ? `<div class="pf-h2">คำรับรองของพนักงานผู้รับรอง (สมาชิกประเภทที่ ๓ บุคคลภายนอก)</div>
+        <p class="pf-cert">${esc(certText(`(ลำดับที่ ${outRows.join(', ')})`))}</p>` : '<div class="pf-h2">รูปถ่ายและค่าธรรมเนียม</div>'}
         <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบรูปถ่ายและค่าธรรมเนียมในการสมัครเป็นสมาชิก มาดังนี้</p>
         <table class="pf-attach">
           <tr><td class="n">1.</td><td>รูปถ่ายขนาด 1 นิ้ว หน้าตรง ไม่สวมหมวก ของผู้สมัครคนละ 2 รูป</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} ใบ</td></tr>
@@ -714,7 +716,7 @@
           <tr><td class="n">3.</td><td>ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
           ${Number(app.facility_fee) ? `<tr><td class="n">4.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
         </table>
-        <p class="pf-note">หมายเหตุ: ${esc(usageNote(outSeqs.length > 0))}</p>
+        <p class="pf-note">หมายเหตุ: ${esc(usageNote(outRows.length > 0))}</p>
         <div class="pf-sign">
           <div class="pf-row">ลายมือชื่อ ${fill('', '', 'grow')}</div>
           <div class="pf-row">ตำแหน่ง ${fill(app.position, '', 'grow')}</div>
@@ -762,6 +764,13 @@
       if (el.scrollWidth > el.clientWidth + 1) { // still too long (e.g. a long ตำแหน่ง): wrap onto 2 lines
         el.classList.add('wrap');
         el.style.fontSize = '9.5pt';
+      }
+    });
+    root.querySelectorAll('.pf-members .cell').forEach((el) => { // table cells: shrink until it fits the row
+      let size = 10.5;
+      while (el.scrollHeight > el.clientHeight + 1 && size > 7) {
+        size -= 0.5;
+        el.style.fontSize = size + 'pt';
       }
     });
     root.style.cssText = '';
@@ -894,7 +903,7 @@
         <td><strong>${esc(x.full_name)}</strong><span class="sub">${esc(x.relationship)} · ${esc(x.age)} ปี</span></td>
         <td class="addr">${esc(x.address)}</td>
         <td class="nowrap">${x.member_type ? `<span class="badge ${isOutsider(x) ? 'type-out' : 'type-fam'}">${esc(x.member_type)}</span>` : '—'}<span class="sub">${esc(x.membership)}</span></td>
-        <td>${esc(x.applicant_name)}<span class="sub">${esc(x.applicant_type)} · ${esc(x.department)}</span></td>
+        <td>${esc(x.applicant_name)}<span class="sub">${esc(x.department)}</span></td>
         <td><span class="badge ${cls}">${label}</span></td>
         <td><div class="row-actions">
           <button type="button" class="btn btn-ghost btn-sm" data-act="print" data-app="${esc(x.app_id)}">พิมพ์</button>
@@ -912,14 +921,14 @@
     const rows = filteredRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ส่งออก', true); return; }
     const head = ['เลขที่ใบสมัคร', 'ปี พ.ศ.', 'วันที่ยื่น', 'ลำดับ', 'ชื่อ - สกุลสมาชิก', 'อายุ', 'ที่อยู่ / ที่ทำงาน', 'ฐานะ',
-      'ประเภทสมาชิก', 'สมาชิกภาพ', 'ผู้ยื่น', 'ประเภทผู้ยื่น', 'สังกัด', 'ตำแหน่งผู้ยื่น', 'สถานะ'];
+      'ประเภทสมาชิก', 'สมาชิกภาพ', 'ผู้ยื่น', 'สังกัด', 'ตำแหน่งผู้ยื่น', 'สถานะ'];
     const cell = (v) => {
       let s = String(v == null ? '' : v);
       if (/^[=+\-@]/.test(s)) s = "'" + s; // stop formula injection when opened in Excel
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [head].concat(rows.map((x) => [x.app_id, x.year_be, thShort(x.form_date), x.seq, x.full_name, x.age,
-    x.address, x.relationship, x.member_type || '', x.membership, x.applicant_name, x.applicant_type, x.department, x.position, STATUS[x.status][1]]));
+    x.address, x.relationship, x.member_type || '', x.membership, x.applicant_name, x.department, x.position, STATUS[x.status][1]]));
     const csv = '﻿' + lines.map((r) => r.map(cell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: `member-registry-${todayISO()}.csv` });
@@ -969,7 +978,6 @@
       }
     });
     form.addEventListener('change', (e) => {
-      if (e.target.name === 'applicantType') updateTypeHint();
       if (e.target.name === 'purpose') {
         // switching the overall purpose sets every member to the same membership type
         const v = e.target.value;

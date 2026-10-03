@@ -15,6 +15,7 @@
  * Rules: ประกาศ ที่ ปก/ศช.บภ ๒-๑๘๙๙/๒๕๖๙ (แนวปฏิบัติเกี่ยวกับการใช้สถานที่การกีฬาของศูนย์ควบคุมการบินเชียงใหม่ พ.ศ. ๒๕๖๙)
  * Member types (ส่วนที่ ๒ ข้อ ๖)
  *   ประเภท ๑ พนักงาน/ลูกจ้าง/พนักงานเกษียณอายุ — member by status, not listed on the form, no fees
+ *   Form layout: 12 rows = ครอบครัว rows 1–9, บุคคลภายนอก rows 10–12 (seq follows these row numbers)
  *   ประเภท ๒ ครอบครัวพนักงาน — card required: card fee 20 บาท/คน/ปี only
  *   ประเภท ๓ บุคคลภายนอก   — card fee + membership fee 100 บาท/คน/ปี; court fees are paid per use; certified by a
  *                             พนักงานศูนย์ควบคุมการบินเชียงใหม่, max 3 outsiders per certifier
@@ -43,10 +44,10 @@ const FEES = {
   cardOnRenew: true,  // ข้อ ๑๖: ค่าจัดทำบัตร "/คน/ปี" → charged on renewals too
 };
 const RULES = {
-  maxOutsidersPerCertifier: 3,         // ข้อ ๖.๓: per certifier per membership year
-  outsiderCertifierTypes: ['พนักงาน'], // ข้อ ๖.๓: "พนักงานศูนย์ควบคุมการบินเชียงใหม่"
+  maxOutsidersPerCertifier: 3,         // ข้อ ๖.๓: per certifier per membership year (= outsider rows on the form)
 };
-const LIMITS = { maxMembers: 6, text: 150, address: 400 };
+const LIMITS = { maxMembers: 12, text: 150, address: 400 };
+const FAMILY_ROWS = LIMITS.maxMembers - RULES.maxOutsidersPerCertifier; // rows 1–9
 const APPLICANT_TYPES = ['พนักงาน', 'ลูกจ้าง', 'พนักงานเกษียณอายุ'];
 const MEMBERSHIP = ['สมัครใหม่', 'ต่ออายุ'];
 const FAMILY = 'ครอบครัวพนักงาน';
@@ -103,7 +104,7 @@ function submit_(d) {
   const yearBE = Number(formDate.slice(0, 4)) + 543;
   const app = {
     applicant_name: str_(d.applicantName, LIMITS.text, 'ชื่อ - สกุล ผู้ยื่น'),
-    applicant_type: oneOf_(d.applicantType, APPLICANT_TYPES, 'ประเภทผู้ยื่น'),
+    applicant_type: d.applicantType ? oneOf_(d.applicantType, APPLICANT_TYPES, 'ประเภทผู้ยื่น') : '', // no longer asked
     department: str_(d.department, LIMITS.text, 'สังกัด'),
     position: str_(d.position, LIMITS.text, null),
     purpose: oneOf_(d.purpose, MEMBERSHIP, 'ความประสงค์'),
@@ -129,17 +130,18 @@ function submit_(d) {
     };
   });
 
-  // ข้อ ๖.๓ — outsiders need a พนักงาน as certifier, at most 3 each
+  // ข้อ ๖.๓ — at most 3 outsiders per certifier; the rest of the rows are for ครอบครัว
   const outsiders = members.filter(function (m) { return m.member_type === OUTSIDER; });
-  if (outsiders.length) {
-    if (RULES.outsiderCertifierTypes.indexOf(app.applicant_type) === -1) {
-      throw httpError_('สมาชิกประเภทบุคคลภายนอกต้องมี' + RULES.outsiderCertifierTypes.join('/') +
-        'ศูนย์ควบคุมการบินเชียงใหม่เป็นผู้รับรองและยื่นสมัคร', 400);
-    }
-    if (outsiders.length > RULES.maxOutsidersPerCertifier) {
-      throw httpError_('พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ' + RULES.maxOutsidersPerCertifier + ' คน', 400);
-    }
+  if (outsiders.length > RULES.maxOutsidersPerCertifier) {
+    throw httpError_('พนักงาน 1 ท่านรับรองบุคคลภายนอกได้สูงสุด ' + RULES.maxOutsidersPerCertifier + ' คน', 400);
   }
+  if (members.length - outsiders.length > FAMILY_ROWS) {
+    throw httpError_('ครอบครัวพนักงานกรอกได้สูงสุด ' + FAMILY_ROWS + ' คนต่อใบสมัคร', 400);
+  }
+  // seq = row number on the form: ครอบครัว 1..9, บุคคลภายนอก 10..12 (input order kept within each section)
+  let famNo = 0;
+  let outNo = 0;
+  members.forEach(function (m) { m.seq = m.member_type === OUTSIDER ? FAMILY_ROWS + (++outNo) : ++famNo; });
 
   const fees = computeFees_(members);
   const photo = count_(d.photoCount, members.length * 2);

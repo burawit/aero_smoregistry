@@ -9,7 +9,7 @@ window.APP_CONFIG = {
   CARD_FEE: 20,             // บาท/คน
   CARD_FEE_ON_RENEW: true,  // ประกาศ ข้อ ๑๖: ค่าจัดทำบัตร 20 บาท/คน/ปี → ต่ออายุก็เสีย
 
-  MAX_MEMBERS: 3,
+  MAX_MEMBERS: 12,          // rows on the form: ครอบครัว 1–9 + บุคคลภายนอก 10–12 (keep in sync with Code.gs)
 
   // Printed on the staff section of the form
   ADDRESSEE: "ผศช.บภ 2.",
