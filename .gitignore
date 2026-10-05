@@ -1,0 +1,9 @@
+# local only — not pushed (like .env)
+TECHNICAL.md
+
+# macOS
+.DS_Store
+
+# Claude outputs: only the latest documents go to git, under names without a version
+# (member-application-2569.docx / .pdf). Versioned copies (…-v2, …-v3) stay on this computer.
+Claude outputs/*-v[0-9]*.*

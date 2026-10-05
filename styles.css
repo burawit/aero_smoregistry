@@ -483,6 +483,111 @@ textarea.invalid,
   padding: 6px 10px;
 }
 
+/* square photo editor */
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, .62);
+}
+
+.modal-card {
+  width: min(440px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, .35);
+}
+
+.modal-card h2 {
+  font-size: 18px;
+}
+
+.modal-card .hint {
+  margin: 4px 0 12px;
+}
+
+.pe-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0f172a;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pe-stage.dragging {
+  cursor: grabbing;
+}
+
+.pe-stage:focus-visible {
+  outline: 3px solid rgba(29, 58, 110, .45);
+  outline-offset: 2px;
+}
+
+.pe-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* where the face should go: about half the height of the square */
+.pe-guide {
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  top: 12%;
+  bottom: 34%;
+  border: 2px dashed rgba(255, 255, 255, .9);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .25);
+  pointer-events: none;
+}
+
+.pe-guide span {
+  position: absolute;
+  left: 50%;
+  bottom: -26px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #fff;
+  background: rgba(15, 23, 42, .55);
+  padding: 0 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pe-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.pe-tools input[type=range] {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--primary);
+}
+
+.modal-card .form-actions {
+  margin-top: 14px;
+}
+
 /* "ใช้ที่อยู่เดียวกับ คนที่ 1" */
 .addr-copy {
   display: flex;
@@ -533,7 +638,7 @@ textarea.invalid,
 
 .photo-box {
   flex: none;
-  width: 72px;
+  width: 96px;
   height: 96px;
   border: 1.5px dashed var(--line-strong);
   border-radius: 8px;
@@ -560,6 +665,7 @@ textarea.invalid,
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: 50% 30%; /* older 3:4 photos: keep the head */
   display: block;
 }
 
@@ -587,7 +693,7 @@ textarea.invalid,
 }
 
 .photo-field.is-renew .photo-box {
-  width: 54px;
+  width: 72px;
   height: 72px;
 }
 
@@ -619,8 +725,8 @@ textarea.invalid,
 .thumb {
   position: relative;
   flex: none;
-  width: 36px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -636,6 +742,7 @@ textarea.invalid,
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: 50% 30%;
   display: block;
 }
 
@@ -1815,8 +1922,8 @@ textarea.invalid,
 
 .cd-photo {
   flex: none;
-  width: 21mm;
-  height: 28mm;
+  width: 25mm;
+  height: 25mm;
   border: .2mm solid #b9c0cc;
   background: #f3f5f9;
   display: grid;
@@ -1828,6 +1935,7 @@ textarea.invalid,
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: 50% 30%;
   display: block;
 }
 

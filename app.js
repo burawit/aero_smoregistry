@@ -323,43 +323,29 @@
   };
 
   // ------------------------------------------------------------------ photos
-  // Every photo is cropped to 3:4 (รูปถ่าย 1 นิ้ว) in the browser: a card-size JPEG plus a small thumbnail for the registry.
-  const PHOTO_SIZE = [450, 600];
-  const THUMB_SIZE = [96, 128];
+  // Every photo goes through a square crop editor in the browser (drag to place the face, zoom, rotate), then a
+  // card-size JPEG and a small thumbnail for the registry are made from it. Only those are uploaded.
+  const PHOTO_PX = 600;          // square output → Drive
+  const THUMB_PX = 128;          // square thumbnail → Members sheet
+  const SOURCE_MAX = 2000;       // the original is shrunk to this (longest side) to keep memory low on phones
+  const MAX_ZOOM = 4;
   const PERSON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="4" fill="currentColor"/>' +
     '<path d="M4 21c.8-4 4-6.2 8-6.2s7.2 2.2 8 6.2" fill="currentColor"/></svg>';
 
-  function loadImage(file) {
+  function loadImage(src) {
     const viaImg = () => new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(src);
       const img = new Image();
       img.onload = () => { resolve(img); setTimeout(() => URL.revokeObjectURL(url), 0); };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
       img.src = url;
     });
     if (!window.createImageBitmap) return viaImg();
-    return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(viaImg);
+    return createImageBitmap(src, { imageOrientation: 'from-image' }).catch(viaImg);
   }
 
-  function drawCrop(src, w, h, quality) {
-    const sw = src.naturalWidth || src.width;
-    const sh = src.naturalHeight || src.height;
-    const want = w / h;
-    let cw = sw; let ch = sh; let cx = 0; let cy = 0;
-    if (sw / sh > want) { cw = sh * want; cx = (sw - cw) / 2; } // wide: keep the middle
-    else { ch = sw / want; cy = (sh - ch) * 0.3; }            // tall: keep the head
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    const g = c.getContext('2d');
-    g.fillStyle = '#fff';
-    g.fillRect(0, 0, w, h);
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(src, cx, cy, cw, ch, 0, 0, w, h);
-    return { canvas: c, url: c.toDataURL('image/jpeg', quality) };
-  }
-
-  async function makePhoto(file) {
+  // Decode the chosen file once and keep a moderate-size copy (canvas) to edit — and to re-edit later in the form.
+  async function loadSource(file) {
     if (!file) throw new Error('ไม่ได้เลือกไฟล์');
     if (file.type && !/^image\//.test(file.type)) throw new Error('กรุณาเลือกไฟล์รูปภาพ');
     if (file.size > 30 * 1024 * 1024) throw new Error('ไฟล์รูปใหญ่เกินไป (เกิน 30 MB)');
@@ -367,10 +353,195 @@
     try { img = await loadImage(file); } catch (e) {
       throw new Error('เปิดไฟล์รูปนี้ไม่ได้ ลองใช้ไฟล์ JPG หรือ PNG');
     }
-    const full = drawCrop(img, PHOTO_SIZE[0], PHOTO_SIZE[1], 0.85);
-    const thumb = drawCrop(full.canvas, THUMB_SIZE[0], THUMB_SIZE[1], 0.75);
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const k = Math.min(1, SOURCE_MAX / Math.max(w, h));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k));
+    c.height = Math.max(1, Math.round(h * k));
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, c.width, c.height);
     if (img.close) img.close();
-    return { photo: full.url, thumb: thumb.url };
+    return c;
+  }
+
+  // ---- crop editor --------------------------------------------------------------------------------------------
+  // View state in output units (frame = PHOTO_PX square): rot (0..3 × 90°), zoom (1 = image just covers the frame),
+  // x/y = top-left of the drawn (rotated, scaled) image. The image always covers the frame.
+  const editor = { src: null, rot: 0, zoom: 1, x: 0, y: 0, resolve: null, pointers: new Map(), pinch: null };
+
+  const rotSize = (st) => (st.rot % 2 ? [st.src.height, st.src.width] : [st.src.width, st.src.height]);
+  const coverScale = (st) => PHOTO_PX / Math.min(...rotSize(st));
+
+  function clampView(st) {
+    st.zoom = Math.min(MAX_ZOOM, Math.max(1, st.zoom));
+    const s = coverScale(st) * st.zoom;
+    const [w, h] = rotSize(st);
+    st.x = Math.min(0, Math.max(PHOTO_PX - w * s, st.x));
+    st.y = Math.min(0, Math.max(PHOTO_PX - h * s, st.y));
+  }
+
+  function initialView(st) { // centred across, head-room kept for tall shots
+    st.zoom = 1;
+    const s = coverScale(st);
+    const [w, h] = rotSize(st);
+    st.x = (PHOTO_PX - w * s) / 2;
+    st.y = (PHOTO_PX - h * s) * 0.3;
+  }
+
+  function zoomAt(st, factor, fx, fy) { // keep the frame point (fx, fy) still
+    const before = st.zoom;
+    st.zoom = Math.min(MAX_ZOOM, Math.max(1, st.zoom * factor));
+    const k = st.zoom / before;
+    st.x = fx - (fx - st.x) * k;
+    st.y = fy - (fy - st.y) * k;
+    clampView(st);
+  }
+
+  function drawView(ctx, st, size) {
+    const k = size / PHOTO_PX;
+    const s = coverScale(st) * st.zoom;
+    const [w, h] = rotSize(st);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.setTransform(k, 0, 0, k, (st.x + (w * s) / 2) * k, (st.y + (h * s) / 2) * k);
+    ctx.rotate((st.rot * Math.PI) / 2);
+    ctx.drawImage(st.src, (-st.src.width * s) / 2, (-st.src.height * s) / 2, st.src.width * s, st.src.height * s);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  function paintEditor() {
+    const cv = $('#pe-canvas');
+    const px = Math.round(cv.getBoundingClientRect().width * (window.devicePixelRatio || 1)) || PHOTO_PX;
+    if (cv.width !== px) { cv.width = px; cv.height = px; }
+    drawView(cv.getContext('2d'), editor, px);
+    $('#pe-zoom').value = String(editor.zoom);
+  }
+
+  function openEditor(src, view) {
+    Object.assign(editor, { src, rot: 0, pointers: new Map(), pinch: null });
+    if (view) Object.assign(editor, view); else initialView(editor);
+    clampView(editor);
+    const modal = $('#photo-editor');
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+    requestAnimationFrame(paintEditor);
+    $('#pe-stage').focus({ preventScroll: true });
+    return new Promise((resolve) => { editor.resolve = resolve; });
+  }
+
+  function closeEditor(result) {
+    $('#photo-editor').hidden = true;
+    document.body.classList.remove('modal-open');
+    const done = editor.resolve;
+    editor.resolve = null;
+    if (done) done(result);
+  }
+
+  function editorResult() {
+    const out = document.createElement('canvas');
+    out.width = PHOTO_PX;
+    out.height = PHOTO_PX;
+    drawView(out.getContext('2d'), editor, PHOTO_PX);
+    const t = document.createElement('canvas');
+    t.width = THUMB_PX;
+    t.height = THUMB_PX;
+    const g = t.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(out, 0, 0, THUMB_PX, THUMB_PX);
+    return {
+      photo: out.toDataURL('image/jpeg', 0.88),
+      thumb: t.toDataURL('image/jpeg', 0.8),
+      source: editor.src,
+      view: { rot: editor.rot, zoom: editor.zoom, x: editor.x, y: editor.y },
+    };
+  }
+
+  function stageToFrame(clientX, clientY) {
+    const r = $('#pe-stage').getBoundingClientRect();
+    return [((clientX - r.left) / r.width) * PHOTO_PX, ((clientY - r.top) / r.height) * PHOTO_PX];
+  }
+
+  function wireEditor() {
+    const stage = $('#pe-stage');
+    const unit = () => PHOTO_PX / stage.getBoundingClientRect().width;
+    stage.addEventListener('pointerdown', (e) => {
+      stage.setPointerCapture(e.pointerId);
+      editor.pointers.set(e.pointerId, [e.clientX, e.clientY]);
+      stage.classList.add('dragging');
+      if (editor.pointers.size === 2) {
+        const [a, b] = [...editor.pointers.values()];
+        editor.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+      }
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!editor.pointers.has(e.pointerId)) return;
+      const prev = editor.pointers.get(e.pointerId);
+      editor.pointers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (editor.pointers.size === 1) {
+        editor.x += (e.clientX - prev[0]) * unit();
+        editor.y += (e.clientY - prev[1]) * unit();
+        clampView(editor);
+      } else if (editor.pointers.size === 2 && editor.pinch) {
+        const [a, b] = [...editor.pointers.values()];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        editor.x += (mid[0] - editor.pinch.mid[0]) * unit();
+        editor.y += (mid[1] - editor.pinch.mid[1]) * unit();
+        const [fx, fy] = stageToFrame(mid[0], mid[1]);
+        zoomAt(editor, d / editor.pinch.d, fx, fy);
+        editor.pinch = { d, mid };
+      }
+      paintEditor();
+    });
+    const up = (e) => {
+      editor.pointers.delete(e.pointerId);
+      if (editor.pointers.size < 2) editor.pinch = null;
+      if (!editor.pointers.size) stage.classList.remove('dragging');
+    };
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const [fx, fy] = stageToFrame(e.clientX, e.clientY);
+      zoomAt(editor, Math.exp(-e.deltaY * 0.0015), fx, fy);
+      paintEditor();
+    }, { passive: false });
+    stage.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 40 : 10;
+      const moves = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+      if (moves[e.key]) {
+        editor.x += moves[e.key][0];
+        editor.y += moves[e.key][1];
+        clampView(editor);
+      } else if (e.key === '+' || e.key === '=') zoomAt(editor, 1.1, PHOTO_PX / 2, PHOTO_PX / 2);
+      else if (e.key === '-') zoomAt(editor, 1 / 1.1, PHOTO_PX / 2, PHOTO_PX / 2);
+      else return;
+      e.preventDefault();
+      paintEditor();
+    });
+    $('#pe-zoom').addEventListener('input', (e) => {
+      zoomAt(editor, Number(e.target.value) / editor.zoom, PHOTO_PX / 2, PHOTO_PX / 2);
+      paintEditor();
+    });
+    $('#pe-zoom-in').addEventListener('click', () => { zoomAt(editor, 1.2, PHOTO_PX / 2, PHOTO_PX / 2); paintEditor(); });
+    $('#pe-zoom-out').addEventListener('click', () => { zoomAt(editor, 1 / 1.2, PHOTO_PX / 2, PHOTO_PX / 2); paintEditor(); });
+    $('#pe-rotate').addEventListener('click', () => {
+      editor.rot = (editor.rot + 1) % 4;
+      initialView(editor);
+      paintEditor();
+    });
+    $('#pe-reset').addEventListener('click', () => { initialView(editor); paintEditor(); });
+    $('#pe-cancel').addEventListener('click', () => closeEditor(null));
+    $('#pe-ok').addEventListener('click', () => closeEditor(editorResult()));
+    $('#photo-editor').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeEditor(null);
+      else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.preventDefault(); closeEditor(editorResult()); }
+    });
+    window.addEventListener('resize', () => { if (!$('#photo-editor').hidden) paintEditor(); });
   }
 
   // One hidden <input type=file> serves the form and the registry; `onPicked` says where the photo goes.
@@ -387,7 +558,8 @@
     onPicked = null;
     if (!file || !handler) return;
     try {
-      await handler(await makePhoto(file));
+      const result = await openEditor(await loadSource(file));
+      if (result) await handler(result);
     } catch (err) {
       toast(err.message || 'ใช้รูปนี้ไม่ได้', true);
     }
@@ -628,13 +800,14 @@
     else label = 'รูปถ่าย <span class="opt-note">— ต่ออายุใช้รูปเดิมในระบบ ไม่ต้องแนบ</span>';
     const hint = renew
       ? 'แนบใหม่เฉพาะเมื่อต้องการเปลี่ยนรูปบนบัตร'
-      : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ ระบบจะตัดเป็นรูปแนวตั้ง 3:4 ให้เอง';
+      : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ · เลือกแล้วลากจัดใบหน้าให้อยู่กลางกรอบสี่เหลี่ยม';
     return `<div class="field span-3 photo-field${renew && !shown ? ' is-renew' : ''}"><span class="label">${label}</span>
       <div class="photo-row">
         <button type="button" class="photo-box${shown ? ' has-photo' : ''}" data-act="photo"
           aria-label="${shown ? 'เปลี่ยนรูปถ่าย' : 'เลือกรูปถ่าย'}สมาชิกคนที่ ${i + 1}">${shown ? `<img src="${esc(shown)}" alt="">` : PERSON_ICON}${prev ? '<span class="photo-tag">รูปเดิม</span>' : ''}${kept ? '<span class="photo-tag">มีรูปในระบบ</span>' : ''}</button>
         <div class="photo-actions">
           <button type="button" class="btn btn-ghost btn-sm" data-act="photo">${m.photo ? 'เปลี่ยนรูป' : (renew ? 'แนบรูปใหม่' : 'เลือกรูป / ถ่ายรูป')}</button>
+          ${m.photo && m.source ? '<button type="button" class="btn btn-ghost btn-sm" data-act="photo-adjust">ปรับตำแหน่ง</button>' : ''}
           ${m.photo ? '<button type="button" class="link-btn" data-act="photo-remove">ลบรูป</button>' : ''}
           <small class="hint">${hint}</small>
         </div>
@@ -743,16 +916,17 @@
       ta.value = m.address;
       ta.classList.remove('invalid');
       refreshAddrCopy();
-    } else if (act === 'photo') {
-      pickPhoto((r) => {
-        m.photo = r.photo;
-        m.thumb = r.thumb;
+    } else if (act === 'photo' || act === 'photo-adjust') {
+      const apply = (r) => {
+        if (!r) return;
+        Object.assign(m, { photo: r.photo, thumb: r.thumb, source: r.source, view: r.view });
         if (state.members.includes(m)) renderMembers();
         $('#form-error').hidden = true;
-      });
+      };
+      if (act === 'photo-adjust' && m.source) openEditor(m.source, m.view).then(apply);
+      else pickPhoto(apply);
     } else if (act === 'photo-remove') {
-      delete m.photo;
-      delete m.thumb;
+      ['photo', 'thumb', 'source', 'view'].forEach((k) => delete m[k]);
       renderMembers();
     }
   }
@@ -1423,7 +1597,7 @@
       prefillRenewal(id);
     } else if (btn.dataset.act === 'photo') {
       const x = reg.byKey[btn.dataset.key];
-      if (x) pickPhoto((r) => savePhoto(x, r));
+      if (x) pickPhoto((r) => (r ? savePhoto(x, r) : null));
     }
   }
 
@@ -1534,6 +1708,7 @@
     $('#reg-table').addEventListener('change', onRegistryPick);
     $('#print-cards').addEventListener('click', printCards);
     $('#photo-input').addEventListener('change', onPhotoChosen);
+    wireEditor();
 
     if (location.hash === '#registry') switchView('registry');
   }
