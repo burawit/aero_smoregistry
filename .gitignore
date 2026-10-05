@@ -7,3 +7,6 @@ TECHNICAL.md
 # Claude outputs: only the latest documents go to git, under names without a version
 # (member-application-2569.docx / .pdf). Versioned copies (…-v2, …-v3) stay on this computer.
 Claude outputs/*-v[0-9]*.*
+# previews / screenshots may contain members' photos — never push them (public repo)
+Claude outputs/*.png
+Claude outputs/*.jpg

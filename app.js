@@ -418,11 +418,17 @@
     const px = Math.round(cv.getBoundingClientRect().width * (window.devicePixelRatio || 1)) || PHOTO_PX;
     if (cv.width !== px) { cv.width = px; cv.height = px; }
     drawView(cv.getContext('2d'), editor, px);
+    const pv = $('#pe-preview');
+    const ppx = Math.round(pv.getBoundingClientRect().width * (window.devicePixelRatio || 1)) || 200;
+    if (pv.width !== ppx) { pv.width = ppx; pv.height = ppx; }
+    drawView(pv.getContext('2d'), editor, ppx);
     $('#pe-zoom').value = String(editor.zoom);
   }
 
-  function openEditor(src, view) {
+  // `type` = member type, so the size preview shows the card's frame colour
+  function openEditor(src, view, type) {
     Object.assign(editor, { src, rot: 0, pointers: new Map(), pinch: null });
+    $('#pe-preview-box').classList.toggle('t-out', type === OUTSIDER);
     if (view) Object.assign(editor, view); else initialView(editor);
     clampView(editor);
     const modal = $('#photo-editor');
@@ -546,20 +552,20 @@
 
   // One hidden <input type=file> serves the form and the registry; `onPicked` says where the photo goes.
   let onPicked = null;
-  function pickPhoto(handler) {
-    onPicked = handler;
+  function pickPhoto(handler, type) {
+    onPicked = { handler, type };
     const input = $('#photo-input');
     input.value = '';
     input.click();
   }
   async function onPhotoChosen(e) {
     const file = e.target.files && e.target.files[0];
-    const handler = onPicked;
+    const pick = onPicked;
     onPicked = null;
-    if (!file || !handler) return;
+    if (!file || !pick) return;
     try {
-      const result = await openEditor(await loadSource(file));
-      if (result) await handler(result);
+      const result = await openEditor(await loadSource(file), null, pick.type);
+      if (result) await pick.handler(result);
     } catch (err) {
       toast(err.message || 'ใช้รูปนี้ไม่ได้', true);
     }
@@ -923,8 +929,8 @@
         if (state.members.includes(m)) renderMembers();
         $('#form-error').hidden = true;
       };
-      if (act === 'photo-adjust' && m.source) openEditor(m.source, m.view).then(apply);
-      else pickPhoto(apply);
+      if (act === 'photo-adjust' && m.source) openEditor(m.source, m.view, m.memberType).then(apply);
+      else pickPhoto(apply, m.memberType);
     } else if (act === 'photo-remove') {
       ['photo', 'thumb', 'source', 'view'].forEach((k) => delete m[k]);
       renderMembers();
@@ -1597,7 +1603,7 @@
       prefillRenewal(id);
     } else if (btn.dataset.act === 'photo') {
       const x = reg.byKey[btn.dataset.key];
-      if (x) pickPhoto((r) => (r ? savePhoto(x, r) : null));
+      if (x) pickPhoto((r) => (r ? savePhoto(x, r) : null), x.member_type);
     }
   }
 

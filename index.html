@@ -203,7 +203,8 @@
   <div class="modal" id="photo-editor" role="dialog" aria-modal="true" aria-labelledby="pe-title" hidden>
     <div class="modal-card">
       <h2 id="pe-title">จัดรูปถ่าย</h2>
-      <p class="hint">ลากรูปให้ใบหน้าอยู่ในกรอบเส้นประ ซูมด้วยแถบเลื่อน (มือถือใช้สองนิ้ว · คอมพิวเตอร์ใช้ล้อเมาส์)</p>
+      <p class="hint"><b>ซูมให้ใบหน้าเต็มวงรีเส้นประ</b> — บัตรใช้ยืนยันตัวตน · ลากเพื่อเลื่อนรูป ซูมด้วยแถบเลื่อน
+        (มือถือใช้สองนิ้ว · คอมพิวเตอร์ใช้ล้อเมาส์)</p>
       <div class="pe-stage" id="pe-stage" tabindex="0" aria-label="พื้นที่จัดรูป ใช้ลูกศรเพื่อเลื่อน และ + − เพื่อซูม">
         <canvas id="pe-canvas" width="600" height="600"></canvas>
         <div class="pe-guide" aria-hidden="true"><span>ใบหน้า</span></div>
@@ -214,6 +215,10 @@
         <button type="button" class="icon-btn" id="pe-zoom-in" aria-label="ซูมเข้า">+</button>
         <button type="button" class="btn btn-ghost btn-sm" id="pe-rotate">หมุน 90°</button>
         <button type="button" class="link-btn" id="pe-reset">เริ่มใหม่</button>
+      </div>
+      <div class="pe-preview">
+        <div class="pe-preview-box" id="pe-preview-box"><canvas id="pe-preview" width="200" height="200"></canvas></div>
+        <div class="pe-preview-text"><b>ขนาดจริงบนบัตร</b><br>ถ้ามองหน้าในช่องนี้ไม่ชัด ให้ซูมเพิ่ม</div>
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-ghost" id="pe-cancel">ยกเลิก</button>
