@@ -21,6 +21,7 @@
     CARD_TITLE: 'บัตรสมาชิกสถานที่การกีฬา',
     CARD_LOGO: '',                         // optional image in the repo, e.g. "logo.png"
     CARD_CONTACT: '',                      // optional, e.g. "โทร 0 5320 0000"
+    CARD_DIM: 40,                          // % lighter colour fills on the card, to save ink (0 = full colour)
     FAMILY_RIGHTS: 'ใช้ได้ทุกสถานที่การกีฬา',
     OUTSIDER_RIGHTS: 'สนามเทนนิส · สนามแบดมินตัน',
     OUTSIDER_HOURS: 'ทุกวัน ยกเว้นวันอาทิตย์ 15.30–20.30 น.',
@@ -185,9 +186,12 @@
     return data;
   }
 
-  // Demo backend: same shapes as Code.gs, stored in this browser only.
+  // Demo backend: same shapes as Code.gs, stored in this browser only. Document copies (บัตรประชาชน / ทะเบียนบ้าน)
+  // are personal data, so the demo keeps them in memory only — they are gone when the page is closed.
   const demo = (() => {
     let mem = null;
+    const docs = {};
+    const docErr = (msg) => { const err = new Error(msg); err.code = 400; return err; };
     const empty = () => ({ applications: [], members: [], seq: {}, photos: {} });
     const load = () => {
       if (mem) return mem;
@@ -221,8 +225,21 @@
             relationship: blank(m.relationship) ? old.relationship : m.relationship,
             memberType: blank(m.memberType) ? old.member_type : m.memberType,
             kept: old.photo_id ? old : null,
+            keptDoc: old.doc_id ? old : null,
           });
         }) });
+        // copies: required for สมัครใหม่; ต่ออายุ keeps the latest one on file, or must attach one (same as Code.gs)
+        const keptDoc = d.members.map((m, i) => {
+          if (m.doc) {
+            if (!DOC_TYPES.includes(m.doc.type)) throw docErr(`กรุณาเลือกชนิดของสำเนาเอกสารของสมาชิกคนที่ ${i + 1}`);
+            return null;
+          }
+          if (m.membership === 'สมัครใหม่') throw docErr(`กรุณาแนบสำเนาบัตรประชาชนหรือทะเบียนบ้านของสมาชิกคนที่ ${i + 1} (สมัครใหม่)`);
+          const kept = m.keptDoc || db.members.slice().reverse().find((r) => r.doc_id && key(r.full_name) === key(m.fullName) &&
+            key(r.applicant_name) === key(d.applicantName));
+          if (!kept) throw docErr(`สมาชิกคนที่ ${i + 1} (${m.fullName}) ยังไม่มีสำเนาบัตรประชาชนหรือทะเบียนบ้านในระบบ กรุณาแนบสำเนาเอกสาร`);
+          return kept;
+        });
         const outs = d.members.filter(isOutsider);
         const ruleErrs = countRuleErrors(d.members.length - outs.length, outs.length);
         if (ruleErrs.length) throw new Error(ruleErrs[0]);
@@ -248,6 +265,7 @@
           member_count: f.count, family_count: f.familyCount, outsider_count: f.outsiderCount,
           new_count: f.newCount, renew_count: f.renewCount,
           photo_count: d.members.filter((m, i) => m.photo || reused[i]).length,
+          doc_count: d.members.length,
           member_fee: f.memberFee, card_fee: f.cardFee, facility_fee: f.facilityFee,
           total_fee: f.total, renewed_from: d.renewedFrom || '', created_at: createdAt,
         };
@@ -258,12 +276,16 @@
           applicant_name: d.applicantName, department: d.department, created_at: createdAt,
           photo_id: m.photo ? `demo:${appId}|${rowNo[i]}` : (reused[i] ? reused[i].photo_id : ''),
           photo_thumb: m.photo ? m.thumb : (reused[i] ? reused[i].photo_thumb : ''),
+          doc_id: m.doc ? `demo:${appId}|${rowNo[i]}` : keptDoc[i].doc_id,
+          doc_type: m.doc ? m.doc.type : keptDoc[i].doc_type,
         }));
         d.members.forEach((m, i) => { if (m.photo) db.photos[`${appId}|${rowNo[i]}`] = m.photo; });
+        d.members.forEach((m, i) => { if (m.doc) docs[`${appId}|${rowNo[i]}`] = m.doc.data; });
         db.applications.push(application);
         db.members.push(...members);
         save(db);
-        return { ok: true, appId, application, members: members.map((m) => Object.assign({}, m, { photo_thumb: undefined })) };
+        return { ok: true, appId, application, members: members.map((m) => Object.assign({}, m, { photo_thumb: undefined,
+          doc_id: undefined, has_doc: !!m.doc_id })) };
       },
       list() {
         const db = load();
@@ -289,10 +311,11 @@
           err.code = 404;
           throw err;
         }
-        const onFile = (m) => !!m.photo_id || db.members.some((r) => r.photo_id && key(r.full_name) === key(m.full_name) &&
+        const onFile = (m, col) => !!m[col] || db.members.some((r) => r[col] && key(r.full_name) === key(m.full_name) &&
           key(r.applicant_name) === key(app.applicant_name));
         const members = db.members.filter((m) => m.app_id === appId).sort((a, b) => a.seq - b.seq).map((m) => ({
-          seq: m.seq, full_name: m.full_name, member_type: m.member_type, has_photo: onFile(m),
+          seq: m.seq, full_name: m.full_name, member_type: m.member_type,
+          has_photo: onFile(m, 'photo_id'), has_doc: onFile(m, 'doc_id'),
         }));
         const { app_id, year_be, applicant_name, department, position } = app;
         return { ok: true, application: { app_id, year_be, applicant_name, department, position }, members };
@@ -308,6 +331,25 @@
         save(db);
         return { ok: true, photo_id: row.photo_id, photo_thumb: row.photo_thumb };
       },
+      doc(appId, seq) {
+        const row = load().members.find((r) => `${r.app_id}|${r.seq}` === `${appId}|${seq}`);
+        if (!row) throw new Error('ไม่พบสมาชิก');
+        if (!row.doc_id) throw new Error('สมาชิกคนนี้ยังไม่มีสำเนาเอกสาร');
+        const data = docs[String(row.doc_id).replace(/^demo:/, '')];
+        if (!data) throw new Error('โหมดทดลองไม่เก็บไฟล์สำเนาไว้หลังปิดหรือรีเฟรชหน้าเว็บ — แนบใหม่ได้ที่ปุ่ม "แนบไฟล์ใหม่"');
+        return { ok: true, doc: { type: row.doc_type, mime: data.slice(5, data.indexOf(';')), name: '', data } };
+      },
+      setDoc(d) {
+        const db = load();
+        const k = `${d.appId}|${d.seq}`;
+        const row = db.members.find((r) => `${r.app_id}|${r.seq}` === k);
+        if (!row) throw new Error('ไม่พบสมาชิก');
+        if (!DOC_TYPES.includes(d.doc && d.doc.type)) throw docErr('กรุณาเลือกชนิดของสำเนาเอกสาร');
+        if (d.doc.data) { docs[k] = d.doc.data; row.doc_id = `demo:${k}`; } else if (!row.doc_id) throw docErr('กรุณาเลือกไฟล์สำเนาเอกสาร');
+        row.doc_type = d.doc.type;
+        save(db);
+        return { ok: true, doc_id: row.doc_id, doc_type: row.doc_type };
+      },
     };
   })();
 
@@ -318,6 +360,8 @@
     list: (key) => (DEMO ? demoCall(() => demo.list()) : call('list', { key })),
     photos: (key, members) => (DEMO ? demoCall(() => demo.photos(members)) : call('photos', { key, members })),
     setPhoto: (key, d) => (DEMO ? demoCall(() => demo.setPhoto(d)) : call('setPhoto', Object.assign({ key }, d))),
+    doc: (key, appId, seq) => (DEMO ? demoCall(() => demo.doc(appId, seq)) : call('doc', { key, appId, seq })),
+    setDoc: (key, d) => (DEMO ? demoCall(() => demo.setDoc(d)) : call('setDoc', Object.assign({ key }, d))),
     renewLookup: (appId, applicantName) => (DEMO ? demoCall(() => demo.renewLookup(appId, applicantName))
       : call('renewLookup', { appId, applicantName })),
   };
@@ -428,7 +472,7 @@
   // `type` = member type, so the size preview shows the card's frame colour
   function openEditor(src, view, type) {
     Object.assign(editor, { src, rot: 0, pointers: new Map(), pinch: null });
-    $('#pe-preview-box').classList.toggle('t-out', type === OUTSIDER);
+    $('#pe-preview-box').style.borderColor = cardColors()[type === OUTSIDER ? 'out' : 'fam']; // as it prints
     if (view) Object.assign(editor, view); else initialView(editor);
     clampView(editor);
     const modal = $('#photo-editor');
@@ -571,6 +615,104 @@
     }
   }
 
+  // ------------------------------------------------------------------ document copies
+  // สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน, one per member (required for สมัครใหม่; ต่ออายุ keeps the copy on file).
+  // A photo of the document is shrunk to DOC_PX (longest side) and re-saved as JPEG; a PDF is sent as it is.
+  // Keep the sizes in sync with DOC in Code.gs.
+  const DOC_TYPES = ['บัตรประชาชน', 'ทะเบียนบ้าน'];
+  const DOC_SHORT = { 'บัตรประชาชน': 'บัตร ปชช.', 'ทะเบียนบ้าน': 'ทะเบียนบ้าน' };
+  const DOC_PX = 1600;
+  const DOC_JPEG_MAX = 900 * 1024;
+  const DOC_PDF_MAX = 1536 * 1024;
+  const DOC_TOTAL_MAX = 14 * 1024 * 1024;
+  const DOC_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 2.5V7h5M8.8 11.5h7.4M8.8 14.5h7.4M8.8 17.5h4.6" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  const fileSize = (n) => (n >= 1024 * 1024 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  const dataBytes = (url) => { const b64 = String(url || '').split(',')[1] || ''; return Math.floor(b64.length * 3 / 4); };
+  const hasDocOf = (m) => !!(m && (m.has_doc || m.doc_id));            // server rows (doc_id) or submit replies (has_doc)
+  const docTypeOf = (m) => (hasDocOf(m) ? m.doc_type || '' : '');
+
+  function bytesToBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  // File → { mime, data (data URL), name, size }. Throws a message the user can act on.
+  async function readDoc(file) {
+    if (!file) throw new Error('ไม่ได้เลือกไฟล์');
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (isPdf) {
+      if (file.size > DOC_PDF_MAX) {
+        throw new Error(`ไฟล์ PDF ใหญ่เกินไป (${fileSize(file.size)} · สูงสุด ${fileSize(DOC_PDF_MAX)}) — ถ่ายรูปเอกสารแทน หรือสแกนความละเอียดต่ำลง`);
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (String.fromCharCode.apply(null, bytes.subarray(0, 4)) !== '%PDF') throw new Error('ไฟล์นี้ไม่ใช่ PDF ที่ถูกต้อง');
+      return { mime: 'application/pdf', data: 'data:application/pdf;base64,' + bytesToBase64(bytes), name: file.name || 'เอกสาร.pdf', size: file.size };
+    }
+    if (file.type && !/^image\//.test(file.type)) throw new Error('กรุณาเลือกรูปภาพ (JPG, PNG) หรือไฟล์ PDF');
+    if (file.size > 30 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกินไป (เกิน 30 MB)');
+    let img;
+    try { img = await loadImage(file); } catch (e) {
+      throw new Error('เปิดไฟล์นี้ไม่ได้ ลองใช้ไฟล์ JPG, PNG หรือ PDF');
+    }
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    let px = DOC_PX;
+    let data = '';
+    for (let tries = 0; tries < 4; tries++) {      // shrink until it fits DOC_JPEG_MAX (text stays readable)
+      const k = Math.min(1, px / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * k));
+      c.height = Math.max(1, Math.round(h * k));
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';                         // transparent PNG → white paper, not black
+      g.fillRect(0, 0, c.width, c.height);
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, c.width, c.height);
+      for (const q of [0.85, 0.75, 0.65]) {
+        data = c.toDataURL('image/jpeg', q);
+        if (dataBytes(data) <= DOC_JPEG_MAX) break;
+      }
+      if (dataBytes(data) <= DOC_JPEG_MAX) break;
+      px = Math.round(px * 0.8);
+    }
+    if (img.close) img.close();
+    if (dataBytes(data) > DOC_JPEG_MAX) throw new Error('รูปเอกสารนี้ใหญ่เกินไป ลองถ่ายใหม่ให้เห็นเฉพาะเอกสาร');
+    return { mime: 'image/jpeg', data, name: file.name || 'เอกสาร.jpg', size: dataBytes(data) };
+  }
+
+  // One hidden <input type=file> for copies (form and registry), like the photo input.
+  let onDocPicked = null;
+  function pickDoc(handler) {
+    onDocPicked = handler;
+    const input = $('#doc-input');
+    input.value = '';
+    input.click();
+  }
+  async function onDocChosen(e) {
+    const file = e.target.files && e.target.files[0];
+    const handler = onDocPicked;
+    onDocPicked = null;
+    if (!file || !handler) return;
+    try {
+      await handler(await readDoc(file));
+    } catch (err) {
+      toast(err.message || 'ใช้ไฟล์นี้ไม่ได้', true);
+    }
+  }
+
+  // data URL → object URL (Chrome will not show a data: PDF inside an iframe)
+  function dataToObjectUrl(url) {
+    const [head, b64] = String(url).split(',');
+    const mime = (/^data:([^;]+)/.exec(head) || [])[1] || 'application/octet-stream';
+    const bin = atob(b64 || '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  }
+
   // ------------------------------------------------------------------ views
   function switchView(name) {
     $$('.tab').forEach((t) => {
@@ -671,6 +813,7 @@
 
   const blankMember = (membership) => ({
     fullName: '', age: '', address: '', relationship: '', memberType: '', membership: membership || 'สมัครใหม่',
+    docType: DOC_TYPES[0],
   });
 
   function radios(name, options, selected) {
@@ -731,6 +874,8 @@
     $('#member-rules').innerHTML = `
       <p>พนักงาน ลูกจ้าง และพนักงานเกษียณอายุ (ประเภท ๑) เป็นสมาชิกโดยสถานภาพ <b>ไม่ต้องใส่ชื่อตนเอง</b></p>
       <p>ประเภท ๒ และ ๓ ต้องทำบัตรสมาชิก และแสดง/ฝากบัตรกับเจ้าหน้าที่ทุกครั้งก่อนเข้าใช้บริการ</p>
+      <p>สมัครใหม่ต้องแนบ<b>รูปถ่าย 1 รูป</b> (ใช้ทำบัตร) และ<b>สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน</b>ของสมาชิกทุกคน (ถ่ายจากมือถือได้) ` +
+      `ต่ออายุใช้ของเดิมในระบบ · แนะนำเขียนกำกับบนสำเนาว่า "ใช้สมัครสมาชิกสถานที่การกีฬาเท่านั้น"</p>
       <p>บุคคลภายนอก (ประเภท ๓) ต้องมีพนักงาน${esc(CFG.CERTIFIER_UNIT)}เป็นผู้รับรอง ` +
       `สูงสุด ${CFG.MAX_OUTSIDERS} คนต่อพนักงาน 1 ท่าน · ${esc(CFG.OUTSIDER_RULES)}</p>
       <p class="rules-ref">อ้างอิง ${esc(CFG.RULE_REF)}</p>`;
@@ -765,7 +910,7 @@
           </div>
         </div>
         ${m.carry ? `<p class="carry-note">ข้อมูลจากใบสมัครเดิม ${esc(m.carry.appId)} — ช่องที่เว้นว่างจะใช้ข้อมูลเดิมที่เก็บไว้ในระบบ
-          (อายุปรับเพิ่มตามปีให้เอง) กรอกเฉพาะช่องที่ต้องการเปลี่ยน เช่นเดียวกับรูปถ่าย</p>` : ''}
+          (อายุปรับเพิ่มตามปีให้เอง) กรอกเฉพาะช่องที่ต้องการเปลี่ยน เช่นเดียวกับรูปถ่ายและสำเนาเอกสาร</p>` : ''}
         <div class="grid">
           <fieldset class="field span-3"><legend class="label">ประเภทสมาชิก</legend>
             <div class="seg cards" data-k="memberType">${typeCards(`mtype-${i}`, m.memberType, typeLimits(i))}</div>
@@ -787,6 +932,7 @@
             <div class="seg small" data-k="membership">${radios(`membership-${i}`, MEMBERSHIP.map((v) => [v, v]), m.membership)}</div>
           </fieldset>
           ${photoField(m, i)}
+          ${docField(m, i)}
         </div>
       </div>`).join('');
     $('#add-member').hidden = state.members.length >= max;
@@ -800,13 +946,14 @@
     const kept = renew && !m.photo && m.carry && m.hasPhoto;     // public lookup: the photo stays hidden
     const shown = m.thumb || prev;
     let label;
-    if (!renew) label = 'รูปถ่ายหน้าตรง <span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
+    if (!renew) label = 'รูปถ่ายหน้าตรง 1 รูป สำหรับทำบัตร <span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
     else if (prev || kept) label = 'รูปถ่าย <span class="opt-note">— มีรูปเดิมในระบบแล้ว ไม่ต้องแนบ</span>';
     else if (m.carry) label = 'รูปถ่าย <span class="opt-note">— ยังไม่มีรูปในระบบ แนบได้เลย (ไม่บังคับ)</span>';
     else label = 'รูปถ่าย <span class="opt-note">— ต่ออายุใช้รูปเดิมในระบบ ไม่ต้องแนบ</span>';
     const hint = renew
       ? 'แนบใหม่เฉพาะเมื่อต้องการเปลี่ยนรูปบนบัตร'
-      : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ · เลือกแล้วลากจัดใบหน้าให้อยู่กลางกรอบสี่เหลี่ยม';
+      : 'หน้าตรง ไม่สวมหมวก เห็นใบหน้าชัด ถ่ายจากมือถือได้ · เลือกแล้วลากจัดใบหน้าให้อยู่กลางกรอบสี่เหลี่ยม · ' +
+        'แนบรูปเดียวพอ เจ้าหน้าที่พิมพ์รูปขนาด 2 นิ้วสำหรับเอกสารให้เอง ไม่ต้องส่งรูปกระดาษ';
     return `<div class="field span-3 photo-field${renew && !shown ? ' is-renew' : ''}"><span class="label">${label}</span>
       <div class="photo-row">
         <button type="button" class="photo-box${shown ? ' has-photo' : ''}" data-act="photo"
@@ -815,6 +962,41 @@
           <button type="button" class="btn btn-ghost btn-sm" data-act="photo">${m.photo ? 'เปลี่ยนรูป' : (renew ? 'แนบรูปใหม่' : 'เลือกรูป / ถ่ายรูป')}</button>
           ${m.photo && m.source ? '<button type="button" class="btn btn-ghost btn-sm" data-act="photo-adjust">ปรับตำแหน่ง</button>' : ''}
           ${m.photo ? '<button type="button" class="link-btn" data-act="photo-remove">ลบรูป</button>' : ''}
+          <small class="hint">${hint}</small>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน: required for สมัครใหม่ · ต่ออายุ keeps the copy on file; one is required only
+  // when none is on file (docOnFile === false, known from the lookup / registry; unknown → the server checks).
+  function docField(m, i) {
+    const renew = m.membership === 'ต่ออายุ';
+    const onFile = renew && !m.doc && m.docOnFile === true;
+    const missing = renew && !m.doc && m.docOnFile === false;
+    let note;
+    if (!renew) note = '<span class="req-note">(ต้องแนบสำหรับสมัครใหม่)</span>';
+    else if (m.doc) note = '<span class="opt-note">— ใช้ฉบับใหม่นี้แทนฉบับเดิม</span>';
+    else if (onFile) note = `<span class="opt-note">— มีสำเนาเดิมในระบบแล้ว${m.prevDocType ? ` (${esc(m.prevDocType)})` : ''} ไม่ต้องแนบ</span>`;
+    else if (missing) note = '<span class="req-note">— ยังไม่มีสำเนาในระบบ ต้องแนบ</span>';
+    else note = '<span class="opt-note">— ต่ออายุใช้สำเนาเดิมในระบบ (ถ้ายังไม่เคยยื่น ต้องแนบ)</span>';
+    const showType = !!m.doc || !renew || missing;
+    const preview = m.doc
+      ? (m.doc.mime === 'application/pdf' ? `${DOC_ICON}<span class="doc-ext">PDF</span>` : `<img src="${esc(m.doc.data)}" alt="">`)
+      : DOC_ICON;
+    const hint = m.doc
+      ? `${esc(m.doc.name)} · ${fileSize(m.doc.size)}`
+      : (renew && !missing ? 'แนบใหม่เฉพาะเมื่อข้อมูลเปลี่ยน เช่น ย้ายที่อยู่ หรือเพิ่งทำบัตรประชาชน'
+        : 'ถ่ายรูปหรือสแกนให้เห็นทั้งฉบับและอ่านออกชัด · JPG, PNG หรือ PDF · เด็กที่ยังไม่มีบัตรประชาชนใช้ทะเบียนบ้าน');
+    return `<div class="field span-3 doc-field${renew && !m.doc && !missing ? ' is-renew' : ''}">
+      <span class="label">สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน ${note}</span>
+      ${showType ? `<div class="seg small chips doc-type" data-k="docType" role="radiogroup" aria-label="ชนิดของสำเนาเอกสารสมาชิกคนที่ ${i + 1}">${radios(`doctype-${i}`, DOC_TYPES.map((v) => [v, v]), m.docType)}</div>` : ''}
+      <div class="photo-row">
+        <button type="button" class="doc-box${m.doc ? ' has-doc' : ''}" data-act="doc"
+          aria-label="${m.doc ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์'}สำเนาเอกสารสมาชิกคนที่ ${i + 1}">${preview}${onFile ? '<span class="photo-tag">มีในระบบ</span>' : ''}</button>
+        <div class="photo-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-act="doc">${m.doc ? 'เปลี่ยนไฟล์' : (renew && !missing ? 'แนบฉบับใหม่' : 'เลือกไฟล์ / ถ่ายรูปเอกสาร')}</button>
+          ${m.doc ? '<button type="button" class="link-btn" data-act="doc-remove">ลบไฟล์</button>' : ''}
           <small class="hint">${hint}</small>
         </div>
       </div>
@@ -894,9 +1076,11 @@
             renderMembers();
           }
         }
+      } else if (t.name.startsWith('doctype-')) {
+        m.docType = t.value;
       } else {
         m.membership = t.value;
-        renderMembers(); // the photo field differs for สมัครใหม่ / ต่ออายุ
+        renderMembers(); // the photo and copy fields differ for สมัครใหม่ / ต่ออายุ
       }
       return;
     }
@@ -934,6 +1118,16 @@
     } else if (act === 'photo-remove') {
       ['photo', 'thumb', 'source', 'view'].forEach((k) => delete m[k]);
       renderMembers();
+    } else if (act === 'doc') {
+      pickDoc((doc) => {
+        m.doc = doc;
+        if (!DOC_TYPES.includes(m.docType)) m.docType = DOC_TYPES[0];
+        if (state.members.includes(m)) renderMembers();
+        $('#form-error').hidden = true;
+      });
+    } else if (act === 'doc-remove') {
+      delete m.doc;
+      renderMembers();
     }
   }
 
@@ -961,6 +1155,7 @@
         fullName: String(m.fullName).trim(), age: int(m.age), address: String(m.address).trim(),
         relationship: String(m.relationship).trim(), memberType: m.memberType, membership: m.membership,
         photo: m.photo || undefined, thumb: m.photo ? m.thumb : undefined,
+        doc: m.doc ? { type: m.docType, data: m.doc.data } : undefined,
         renewOf: m.carry || undefined,
       })),
       agree: form.agree.checked,
@@ -992,7 +1187,18 @@
       if (!MEMBER_TYPES.some(([v]) => v === m.memberType)) bad(f('memberType'), `กรุณาเลือกประเภทสมาชิกลำดับที่ ${n}`);
       if (!MEMBERSHIP.includes(m.membership)) bad(f('membership'), `กรุณาเลือกสมาชิกภาพลำดับที่ ${n}`);
       if (m.membership === 'สมัครใหม่' && !m.photo) bad(card.querySelector('.photo-box'), `กรุณาแนบรูปถ่ายของสมาชิกคนที่ ${n} (สมัครใหม่)`);
+      const st = state.members[i];
+      if (!m.doc && m.membership === 'สมัครใหม่') {
+        bad(card.querySelector('.doc-box'), `กรุณาแนบสำเนาบัตรประชาชนหรือทะเบียนบ้านของสมาชิกคนที่ ${n} (สมัครใหม่)`);
+      } else if (!m.doc && st.docOnFile === false) {
+        bad(card.querySelector('.doc-box'), `สมาชิกคนที่ ${n} ยังไม่มีสำเนาบัตรประชาชนหรือทะเบียนบ้านในระบบ กรุณาแนบ`);
+      }
+      if (m.doc && !DOC_TYPES.includes(m.doc.type)) bad(f('docType'), `กรุณาเลือกชนิดของสำเนาเอกสารของสมาชิกคนที่ ${n}`);
     });
+    const docTotal = d.members.reduce((sum, m) => sum + (m.doc ? dataBytes(m.doc.data) : 0), 0);
+    if (docTotal > DOC_TOTAL_MAX) {
+      errors.push({ el: $('#members'), msg: `ไฟล์สำเนาเอกสารรวมกันใหญ่เกินไป (${fileSize(docTotal)} · สูงสุด ${fileSize(DOC_TOTAL_MAX)}) — ใช้รูปถ่ายเอกสารแทน PDF` });
+    }
     const outsiderCount = d.members.filter(isOutsider).length;
     countRuleErrors(d.members.length - outsiderCount, outsiderCount)
       .forEach((msg) => errors.push({ el: $('#members'), msg }));
@@ -1064,13 +1270,16 @@
     updatePosHint();
     form.querySelector('input[name=purpose][value="ต่ออายุ"]').checked = true;
     const type = (m) => (MEMBER_TYPES.some(([v]) => v === m.member_type) ? m.member_type : '');
+    // staff view: the copy the server would keep = latest one of the same member + ผู้ยื่น (as Code.gs looks it up)
+    const keptDoc = (m) => (m.doc_id ? m : (reg.rows || []).find((r) => r.doc_id && r.pk === m.pk)) || null;
     state.members = ms.map((m) => (fromLookup
       // public lookup: names only — blank fields keep what is stored (Code.gs copies them on save)
       ? { fullName: m.full_name, age: '', address: '', relationship: '', membership: 'ต่ออายุ', memberType: type(m),
-        carry: { appId, seq: Number(m.seq) }, hasPhoto: !!m.has_photo }
+        carry: { appId, seq: Number(m.seq) }, hasPhoto: !!m.has_photo, docOnFile: !!m.has_doc, docType: DOC_TYPES[0] }
       // staff, from the registry: full details
       : { fullName: m.full_name, age: m.age === '' ? '' : Number(m.age) + diff, address: m.address,
-        relationship: m.relationship, membership: 'ต่ออายุ', memberType: type(m), prevThumb: m.photo_thumb || '' }));
+        relationship: m.relationship, membership: 'ต่ออายุ', memberType: type(m), prevThumb: m.photo_thumb || '',
+        docOnFile: !!keptDoc(m), prevDocType: (keptDoc(m) || {}).doc_type || '', docType: DOC_TYPES[0] }));
     if (!state.members.length) state.members = [blankMember('ต่ออายุ')];
     state.renewedFrom = appId;
     renderMembers();
@@ -1159,15 +1368,17 @@
     const outs = ms.filter(isOutsider).slice(0, CFG.MAX_OUTSIDERS);
     const outRows = outs.map((_, k) => FAMILY_ROWS + k + 1);
     const cell = (v, cls) => `<td class="${cls || ''}"><div class="cell">${esc(v)}</div></td>`;
+    // สำเนาเอกสาร: ticked from the copy on file (บัตรประชาชน / ทะเบียนบ้าน)
+    const docBoxes = (m) => DOC_TYPES.map((t) => `<td class="c">${box(!!m && docTypeOf(m) === t)}</td>`).join('');
     const row = (no, m) => (m
       ? `<tr><td class="c">${no}.</td>${cell(m.full_name, 'val')}${cell(m.age, 'c val')}${cell(m.address, 'val')}` +
         `${cell(m.relationship, 'val')}<td class="c">${box(m.membership === 'สมัครใหม่')}</td>` +
-        `<td class="c">${box(m.membership === 'ต่ออายุ')}</td><td></td></tr>`
-      : `<tr><td class="c">${no}.</td><td></td><td></td><td></td><td></td><td class="c">${box()}</td><td class="c">${box()}</td><td></td></tr>`);
+        `<td class="c">${box(m.membership === 'ต่ออายุ')}</td>${docBoxes(m)}<td></td></tr>`
+      : `<tr><td class="c">${no}.</td><td></td><td></td><td></td><td></td><td class="c">${box()}</td><td class="c">${box()}</td>${docBoxes(null)}<td></td></tr>`);
     const rows =
-      `<tr class="sect"><td colspan="8">ประเภท ๒ ครอบครัวพนักงาน — ค่าจัดทำบัตร ${CFG.CARD_FEE} บาท/คน/ปี</td></tr>` +
+      `<tr class="sect"><td colspan="10">ประเภท ๒ ครอบครัวพนักงาน — ค่าจัดทำบัตร ${CFG.CARD_FEE} บาท/คน/ปี</td></tr>` +
       Array.from({ length: FAMILY_ROWS }, (_, i) => row(i + 1, fam[i])).join('') +
-      `<tr class="sect"><td colspan="8">ประเภท ๓ บุคคลภายนอก (ไม่เกิน ${CFG.MAX_OUTSIDERS} คน ต้องมีพนักงานรับรอง) — ` +
+      `<tr class="sect"><td colspan="10">ประเภท ๓ บุคคลภายนอก (ไม่เกิน ${CFG.MAX_OUTSIDERS} คน ต้องมีพนักงานรับรอง) — ` +
       `ค่าจัดทำบัตร ${CFG.CARD_FEE} + ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี</td></tr>` +
       Array.from({ length: CFG.MAX_OUTSIDERS }, (_, k) => row(FAMILY_ROWS + k + 1, outs[k])).join('');
 
@@ -1190,11 +1401,11 @@
         <div class="pf-row pf-indent1">${PURPOSES.map(([v, l]) => `<span class="pf-opt">${box(app.purpose === v)}${l}</span>`).join('')}</div>
         <div class="pf-row">(โปรดระบุรายละเอียดผู้เป็นสมาชิก)</div>
         <table class="pf-members">
-          <colgroup><col style="width:6%"><col style="width:23%"><col style="width:6%"><col style="width:29%"><col style="width:12%"><col style="width:6%"><col style="width:6%"><col style="width:12%"></colgroup>
+          <colgroup><col style="width:5.5%"><col style="width:20.5%"><col style="width:5%"><col style="width:25%"><col style="width:11%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:6%"><col style="width:10.5%"></colgroup>
           <thead><tr><th rowspan="2">ลำดับ</th><th rowspan="2">ชื่อ - สกุล</th><th rowspan="2">อายุ</th>
             <th rowspan="2">สถานที่อยู่อาศัย / ทำงานในปัจจุบัน<br>(ที่สามารถติดต่อได้)</th><th rowspan="2">ฐานะที่เกี่ยวข้อง<br>กับผู้ยื่น</th>
-            <th colspan="2">สมาชิกภาพ</th><th rowspan="2">ลายมือชื่อ<br>ผู้สมัคร</th></tr>
-            <tr><th class="sm">สมัคร<br>ใหม่</th><th class="sm">ต่อ<br>อายุ</th></tr></thead>
+            <th colspan="2">สมาชิกภาพ</th><th colspan="2">สำเนาเอกสาร</th><th rowspan="2">ลายมือชื่อ<br>ผู้สมัคร</th></tr>
+            <tr><th class="sm">สมัคร<br>ใหม่</th><th class="sm">ต่อ<br>อายุ</th><th class="sm">บัตร<br>ปชช.</th><th class="sm">ทะเบียน<br>บ้าน</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
         ${foot(1)}
@@ -1203,13 +1414,14 @@
     const page2 = `
       <section class="pf-page">
         ${outRows.length ? `<div class="pf-h2">คำรับรองของพนักงานผู้รับรอง (สมาชิกประเภทที่ ๓ บุคคลภายนอก)</div>
-        <p class="pf-cert">${esc(certText(`(ลำดับที่ ${outRows.join(', ')})`))}</p>` : '<div class="pf-h2">รูปถ่ายและค่าธรรมเนียม</div>'}
-        <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบรูปถ่ายและค่าธรรมเนียมในการสมัครเป็นสมาชิก มาดังนี้</p>
+        <p class="pf-cert">${esc(certText(`(ลำดับที่ ${outRows.join(', ')})`))}</p>` : '<div class="pf-h2">รูปถ่าย สำเนาเอกสาร และค่าธรรมเนียม</div>'}
+        <p class="pf-cert">พร้อมนี้ ข้าพเจ้าได้แนบรูปถ่าย สำเนาเอกสาร และค่าธรรมเนียมในการสมัครเป็นสมาชิก มาดังนี้</p>
         <table class="pf-attach">
-          <tr><td class="n">1.</td><td>รูปถ่ายหน้าตรงของผู้สมัคร (แนบในระบบ · ต่ออายุใช้รูปเดิม)</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} คน</td></tr>
-          <tr><td class="n">2.</td><td>ค่าจัดทำบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน/ปี (สมาชิกประเภท ๒ และ ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
-          <tr><td class="n">3.</td><td>ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
-          ${Number(app.facility_fee) ? `<tr><td class="n">4.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
+          <tr><td class="n">1.</td><td>รูปถ่ายหน้าตรง คนละ 1 รูป (แนบในระบบ · ต่ออายุใช้รูปเดิม)</td><td class="amt">จำนวน ${fill(app.photo_count, '26mm')} คน</td></tr>
+          <tr><td class="n">2.</td><td>สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน คนละ 1 ฉบับ (แนบในระบบ · ต่ออายุใช้ฉบับเดิม)</td><td class="amt">จำนวน ${fill(ms.filter(hasDocOf).length, '26mm')} คน</td></tr>
+          <tr><td class="n">3.</td><td>ค่าจัดทำบัตรสมาชิก ${CFG.CARD_FEE} บาท/คน/ปี (สมาชิกประเภท ๒ และ ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.card_fee), '26mm')} บาท</td></tr>
+          <tr><td class="n">4.</td><td>ค่าสมาชิก ${CFG.MEMBER_FEE} บาท/คน/ปี (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.member_fee), '26mm')} บาท</td></tr>
+          ${Number(app.facility_fee) ? `<tr><td class="n">5.</td><td>ค่าบริการสถานที่การกีฬา (เฉพาะสมาชิกประเภท ๓)</td><td class="amt">รวมเป็นเงิน ${fill(baht(app.facility_fee), '26mm')} บาท</td></tr>` : ''}
         </table>
         <p class="pf-note">หมายเหตุ: ${esc(usageNote(outRows.length > 0))}</p>
         <div class="pf-sign">
@@ -1279,7 +1491,7 @@
       st.id = 'print-page-style';
       document.head.appendChild(st);
     }
-    st.textContent = mode === 'cards' ? '@page { size: A4 portrait; margin: 0; }' : '';
+    st.textContent = mode === 'cards' || mode === 'photos' ? '@page { size: A4 portrait; margin: 0; }' : '';
     document.body.dataset.print = mode;
   }
 
@@ -1300,6 +1512,15 @@
   const RULE_SHORT = String(CFG.RULE_REF).split(' แนวปฏิบัติ')[0];
 
   const memberNo = (x) => `${x.app_id}-${pad(x.seq)}`;
+
+  // Card colours lightened by CARD_DIM % (mixed with white) to save ink; text on the bands turns dark when light.
+  const CARD_BASE = { navy: [29, 58, 110], fam: [25, 113, 194], out: [232, 89, 12] };
+  function cardColors() {
+    const dim = Math.min(90, Math.max(0, Number(CFG.CARD_DIM) || 0)) / 100;
+    const mix = (c) => `rgb(${c.map((v) => Math.round(v + (255 - v) * dim)).join(', ')})`;
+    return { navy: mix(CARD_BASE.navy), fam: mix(CARD_BASE.fam), out: mix(CARD_BASE.out), on: dim >= 0.25 ? '#14213d' : '#fff' };
+  }
+  const cardStyle = () => { const c = cardColors(); return `--cd-navy:${c.navy};--cd-fam:${c.fam};--cd-out:${c.out};--cd-on:${c.on}`; };
 
   function cardFront(x, photo, issued) {
     const out = isOutsider(x);
@@ -1370,7 +1591,7 @@
       sheets.push(`<section class="cd-sheet"><div class="cd-grid">${back.join('')}</div>
         <div class="cd-sheet-note">บัตรสมาชิก · ด้านหลัง · ชุดที่ ${n}/${total}</div></section>`);
     }
-    return `<div class="cd-print">${sheets.join('')}</div>`;
+    return `<div class="cd-print" style="${cardStyle()}">${sheets.join('')}</div>`;
   }
 
   // Shrink one-line values (long names, long ผู้รับรอง names) until they fit their box.
@@ -1386,6 +1607,18 @@
     root.style.cssText = '';
   }
 
+  // Full-size photos (600 × 600) of the given rows, fetched in small batches → { "appId|seq": dataUrl }
+  async function loadFullPhotos(rows) {
+    const photos = {};
+    const withPhoto = rows.filter((x) => x.photo_id);
+    for (let i = 0; i < withPhoto.length; i += CARDS_PER_SHEET) {
+      const r = await api.photos(kv.get(KEY_STORE, 'session'),
+        withPhoto.slice(i, i + CARDS_PER_SHEET).map((x) => ({ appId: x.app_id, seq: x.seq })));
+      Object.assign(photos, r.photos || {});
+    }
+    return photos;
+  }
+
   async function printCards() {
     const rows = reg.rows.filter((x) => reg.picked.has(rowKey(x)) && x.status === 'active');
     if (!rows.length) { toast('เลือกสมาชิกที่ต้องการพิมพ์บัตรก่อน', true); return; }
@@ -1394,13 +1627,7 @@
     btn.disabled = true;
     btn.textContent = 'กำลังเตรียมบัตร…';
     try {
-      const photos = {};
-      const withPhoto = rows.filter((x) => x.photo_id);
-      for (let i = 0; i < withPhoto.length; i += CARDS_PER_SHEET) {
-        const r = await api.photos(kv.get(KEY_STORE, 'session'),
-          withPhoto.slice(i, i + CARDS_PER_SHEET).map((x) => ({ appId: x.app_id, seq: x.seq })));
-        Object.assign(photos, r.photos || {});
-      }
+      const photos = await loadFullPhotos(rows);
       setPrintMode('cards');
       const root = $('#print-root');
       root.innerHTML = renderCards(rows, photos, todayISO());
@@ -1413,6 +1640,65 @@
     } catch (err) {
       if (err.code === 401) { kv.del(KEY_STORE, 'session'); showLock('รหัสเจ้าหน้าที่ไม่ถูกต้อง'); }
       else toast(err.message || 'เตรียมบัตรไม่สำเร็จ', true);
+    } finally {
+      delete btn.dataset.busy;
+      updatePickButton();
+    }
+  }
+
+  // ================================================================== PHOTO SHEETS
+  // Members upload ONE photo (for the card). For the paper file, staff print the picked members' photos at the
+  // Thai 2-inch size (3.8 × 4.5 cm), 2 copies each: A4, 2 × 5 members per sheet, a caption under each pair (outside
+  // the cut lines). The square photo is trimmed at the sides only — the face stays where the crop editor put it.
+  const PS_COLS = 2;
+  const PS_ROWS = 5;
+  const PS_PER_SHEET = PS_COLS * PS_ROWS;
+  const PS_COPIES = 2;
+
+  function renderPhotoSheets(rows, photos) {
+    const sheets = [];
+    const total = Math.ceil(rows.length / PS_PER_SHEET);
+    for (let i = 0; i < rows.length; i += PS_PER_SHEET) {
+      const chunk = rows.slice(i, i + PS_PER_SHEET);
+      const cells = chunk.map((x) => {
+        const src = photos[rowKey(x)] || x.photo_thumb || '';
+        const pic = src ? `<img src="${esc(src)}" alt="">` : '<span class="ps-none">ยังไม่มีรูปถ่าย</span>';
+        return `<div class="ps-member"><div class="ps-pair">${`<div class="ps-photo">${pic}</div>`.repeat(PS_COPIES)}</div>
+          <div class="ps-cap cd-fit"><b>${esc(x.full_name)}</b> · ${esc(memberNo(x))} · ${esc(x.member_type || '')}</div></div>`;
+      }).join('');
+      const n = sheets.length + 1;
+      sheets.push(`<section class="ps-sheet"><div class="ps-note">รูปถ่ายสมาชิก ขนาด 2 นิ้ว (3.8 × 4.5 ซม.) คนละ ${PS_COPIES} รูป · ` +
+        `แผ่นที่ ${n}/${total} · ${chunk.length} คน — พิมพ์ขนาดจริง 100% (ไม่ย่อให้พอดีหน้า) แล้วตัดตามเส้น</div>` +
+        `<div class="ps-grid">${cells}</div></section>`);
+    }
+    return `<div class="ps-print">${sheets.join('')}</div>`;
+  }
+
+  async function printPhotos() {
+    const rows = reg.rows.filter((x) => reg.picked.has(rowKey(x)) && x.status === 'active');
+    if (!rows.length) { toast('เลือกสมาชิกที่ต้องการพิมพ์รูปถ่ายก่อน', true); return; }
+    const btn = $('#print-photos');
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.textContent = 'กำลังเตรียมรูป…';
+    try {
+      const photos = await loadFullPhotos(rows);
+      setPrintMode('photos');
+      const root = $('#print-root');
+      root.innerHTML = renderPhotoSheets(rows, photos);
+      await Promise.all($$('img', root).map((img) => (img.decode ? img.decode().catch(() => {}) : null)));
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      fitCards(root); // shrink long captions to one line
+      const missing = rows.length - rows.filter((x) => photos[rowKey(x)] || x.photo_thumb).length;
+      const lowRes = rows.filter((x) => !photos[rowKey(x)] && x.photo_thumb).length;
+      if (missing || lowRes) {
+        toast([missing ? `${missing} คนยังไม่มีรูป (เว้นช่องไว้)` : '',
+          lowRes ? `${lowRes} คนดึงรูปเต็มไม่ได้ ใช้รูปย่อแทน (ไม่คมชัด)` : ''].filter(Boolean).join(' · '));
+      }
+      window.print();
+    } catch (err) {
+      if (err.code === 401) { kv.del(KEY_STORE, 'session'); showLock('รหัสเจ้าหน้าที่ไม่ถูกต้อง'); }
+      else toast(err.message || 'เตรียมรูปถ่ายไม่สำเร็จ', true);
     } finally {
       delete btn.dataset.busy;
       updatePickButton();
@@ -1528,11 +1814,13 @@
     const fees = curApps.reduce((s, a) => s + Number(a.total_fee || 0), 0);
     const curOut = curRows.filter(isOutsider).length;
     const noPhoto = curRows.filter((x) => !x.photo_thumb).length;
+    const noDoc = curRows.filter((x) => !x.doc_id).length;
     $('#tiles').innerHTML = `
       <div class="tile"><div class="tile-label">สมาชิก${yearLabel(cur)}</div><div class="tile-value">${curRows.length}</div><div class="tile-sub">ครอบครัว ${curRows.length - curOut} · บุคคลภายนอก ${curOut}</div></div>
       <div class="tile"><div class="tile-label">สมัครใหม่ / ต่ออายุ</div><div class="tile-value">${newCount} / ${curRows.length - newCount}</div><div class="tile-sub">บัตรหมดอายุ ${thMid(yearEndISO(cur))}</div></div>
       <div class="tile${renewCount ? ' warn' : ''}"><div class="tile-label">ต้องต่ออายุ</div><div class="tile-value">${renewCount}</div><div class="tile-sub">สมาชิกปีก่อนที่ยังไม่ต่อ</div></div>
       <div class="tile${noPhoto ? ' warn' : ''}"><div class="tile-label">ยังไม่มีรูปถ่าย</div><div class="tile-value">${noPhoto}</div><div class="tile-sub">สมาชิก${yearLabel(cur)}</div></div>
+      <div class="tile${noDoc ? ' warn' : ''}"><div class="tile-label">ยังไม่มีสำเนาเอกสาร</div><div class="tile-value">${noDoc}</div><div class="tile-sub">บัตรประชาชน / ทะเบียนบ้าน</div></div>
       <div class="tile"><div class="tile-label">ค่าธรรมเนียม${yearLabel(cur)}</div><div class="tile-value">${baht(fees)}</div><div class="tile-sub">บาท จาก ${curApps.length} ใบสมัคร</div></div>`;
 
     const rows = filteredRows();
@@ -1548,6 +1836,9 @@
           <input type="checkbox" data-pick="${esc(k)}" aria-label="เลือกพิมพ์บัตร ${esc(x.full_name)}"${reg.picked.has(k) ? ' checked' : ''}${canCard ? '' : ' disabled title="พิมพ์บัตรได้เฉพาะสมาชิกปีนี้"'}>
           <button type="button" class="thumb${x.photo_thumb ? '' : ' no-photo'}" data-act="photo" data-key="${esc(k)}"
             title="${x.photo_thumb ? 'เปลี่ยนรูปถ่าย' : 'เพิ่มรูปถ่าย'}">${x.photo_thumb ? `<img src="${esc(x.photo_thumb)}" alt="">` : `${PERSON_ICON}<span class="plus">+</span>`}</button>
+          <button type="button" class="doc-thumb${x.doc_id ? '' : ' no-doc'}" data-act="doc" data-key="${esc(k)}"
+            title="${x.doc_id ? `ดูสำเนา${esc(x.doc_type || 'เอกสาร')}` : 'ยังไม่มีสำเนาเอกสาร — แนบไฟล์'}"
+            aria-label="${x.doc_id ? 'ดู' : 'แนบ'}สำเนาเอกสารของ ${esc(x.full_name)}">${DOC_ICON}<span class="doc-tag">${x.doc_id ? esc(DOC_SHORT[x.doc_type] || 'สำเนา') : '+'}</span></button>
         </div></td>
         <td><span class="app-chip">${esc(x.app_id)}</span><span class="sub">ลำดับ ${x.seq} · ${esc(thShort(x.form_date))}</span></td>
         <td><strong>${esc(x.full_name)}</strong><span class="sub">${esc(x.relationship)} · ${esc(x.age)} ปี</span></td>
@@ -1575,14 +1866,15 @@
     const rows = filteredRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ส่งออก', true); return; }
     const head = ['เลขที่ใบสมัคร', 'ปี พ.ศ.', 'วันที่ยื่น', 'ลำดับ', 'ชื่อ - สกุลสมาชิก', 'อายุ', 'ที่อยู่ / ที่ทำงาน', 'ฐานะ',
-      'ประเภทสมาชิก', 'สมาชิกภาพ', 'ผู้ยื่น', 'สังกัด', 'ตำแหน่งผู้ยื่น', 'สถานะ'];
+      'ประเภทสมาชิก', 'สมาชิกภาพ', 'สำเนาเอกสาร', 'ผู้ยื่น', 'สังกัด', 'ตำแหน่งผู้ยื่น', 'สถานะ'];
     const cell = (v) => {
       let s = String(v == null ? '' : v);
       if (/^[=+\-@]/.test(s)) s = "'" + s; // stop formula injection when opened in Excel
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [head].concat(rows.map((x) => [x.app_id, x.year_be, thShort(x.form_date), x.seq, x.full_name, x.age,
-    x.address, x.relationship, x.member_type || '', x.membership, x.applicant_name, x.department, x.position, STATUS[x.status][1]]));
+    x.address, x.relationship, x.member_type || '', x.membership, x.doc_id ? (x.doc_type || 'มี') : 'ยังไม่มี',
+    x.applicant_name, x.department, x.position, STATUS[x.status][1]]));
     const csv = '﻿' + lines.map((r) => r.map(cell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: `member-registry-${todayISO()}.csv` });
@@ -1604,7 +1896,100 @@
     } else if (btn.dataset.act === 'photo') {
       const x = reg.byKey[btn.dataset.key];
       if (x) pickPhoto((r) => (r ? savePhoto(x, r) : null), x.member_type);
+    } else if (btn.dataset.act === 'doc') {
+      const x = reg.byKey[btn.dataset.key];
+      if (x) openDocViewer(x);
     }
+  }
+
+  // ---- staff: view / attach / replace a member's copy (บัตรประชาชน / ทะเบียนบ้าน)
+  const dv = { x: null, pending: null, type: '', url: '', seq: 0 };
+  function dvShow(doc, note) {
+    if (dv.url) { URL.revokeObjectURL(dv.url); dv.url = ''; }
+    const body = $('#dv-body');
+    $('#dv-open').hidden = true;
+    if (!doc) {
+      body.innerHTML = `<div class="dv-empty">${DOC_ICON}<p>${esc(note || 'ยังไม่มีสำเนาเอกสาร')}</p></div>`;
+      return;
+    }
+    dv.url = dataToObjectUrl(doc.data);
+    $('#dv-open').href = dv.url;
+    $('#dv-open').hidden = doc.mime !== 'application/pdf';     // multi-page PDFs read better in the browser's viewer
+    body.innerHTML = doc.mime === 'application/pdf'
+      ? `<iframe src="${esc(dv.url)}" title="สำเนาเอกสาร (PDF)"></iframe>`
+      : `<img src="${esc(dv.url)}" alt="สำเนาเอกสาร">`;
+  }
+  function dvRefresh() {
+    const x = dv.x;
+    $('#dv-type').innerHTML = radios('dv-type', DOC_TYPES.map((v) => [v, v]), dv.type);
+    $('#dv-pick').textContent = x.doc_id || dv.pending ? 'แนบไฟล์ใหม่' : 'แนบไฟล์';
+    const changed = !!dv.pending || (!!x.doc_id && dv.type !== (x.doc_type || ''));
+    $('#dv-save').hidden = !changed;
+    $('#dv-status').textContent = dv.pending ? `ไฟล์ใหม่: ${dv.pending.name} · ${fileSize(dv.pending.size)} — ยังไม่บันทึก`
+      : (x.doc_id ? `${x.doc_type || 'สำเนาเอกสาร'} · บันทึกอยู่ใน Google Drive (ไฟล์ส่วนตัว)` : '');
+  }
+  async function openDocViewer(x) {
+    Object.assign(dv, { x, pending: null, type: x.doc_type || DOC_TYPES[0], seq: dv.seq + 1 });
+    const seq = dv.seq;
+    $('#dv-title').textContent = `สำเนาเอกสาร — ${x.full_name}`;
+    $('#dv-sub').textContent = `${x.app_id} ลำดับ ${x.seq} · ${x.member_type || ''} · ผู้ยื่น ${x.applicant_name}`;
+    $('#doc-viewer').hidden = false;
+    document.body.classList.add('modal-open');
+    dvRefresh();
+    $('#dv-close').focus({ preventScroll: true });
+    if (!x.doc_id) { dvShow(null, 'ยังไม่มีสำเนาบัตรประชาชนหรือทะเบียนบ้าน — กด "แนบไฟล์" เพื่อเพิ่ม'); return; }
+    $('#dv-body').innerHTML = '<div class="dv-empty"><p>กำลังโหลดสำเนาเอกสาร…</p></div>';
+    try {
+      const r = await api.doc(kv.get(KEY_STORE, 'session'), x.app_id, x.seq);
+      if (seq !== dv.seq || $('#doc-viewer').hidden || dv.pending) return;
+      dvShow(r.doc);
+    } catch (err) {
+      if (seq === dv.seq && !dv.pending) dvShow(null, err.message || 'โหลดสำเนาไม่สำเร็จ');
+    }
+  }
+  function closeDocViewer() {
+    $('#doc-viewer').hidden = true;
+    document.body.classList.remove('modal-open');
+    dvShow(null);
+    $('#dv-body').innerHTML = '';
+    dv.seq++;
+    dv.x = null;
+    dv.pending = null;
+  }
+  async function saveDoc() {
+    const x = dv.x;
+    if (!x) return;
+    const btn = $('#dv-save');
+    btn.disabled = true;
+    btn.textContent = 'กำลังบันทึก…';
+    try {
+      const doc = { type: dv.type };
+      if (dv.pending) doc.data = dv.pending.data;
+      const res = await api.setDoc(kv.get(KEY_STORE, 'session'), { appId: x.app_id, seq: x.seq, doc });
+      x.doc_id = res.doc_id;
+      x.doc_type = res.doc_type;
+      toast(`บันทึกสำเนา${x.doc_type}ของ ${x.full_name} แล้ว`);
+      closeDocViewer();
+      renderRegistry();
+    } catch (err) {
+      toast(err.message || 'บันทึกสำเนาไม่สำเร็จ', true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'บันทึก';
+    }
+  }
+  function wireDocViewer() {
+    $('#dv-close').addEventListener('click', closeDocViewer);
+    $('#dv-pick').addEventListener('click', () => pickDoc((doc) => {
+      if (!dv.x) return;
+      dv.pending = doc;
+      dvShow(doc);
+      dvRefresh();
+    }));
+    $('#dv-save').addEventListener('click', saveDoc);
+    $('#dv-type').addEventListener('change', (e) => { if (e.target.name === 'dv-type') { dv.type = e.target.value; dvRefresh(); } });
+    $('#doc-viewer').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDocViewer(); });
+    $('#doc-viewer').addEventListener('click', (e) => { if (e.target.id === 'doc-viewer') closeDocViewer(); });
   }
 
   // Staff adds / replaces a photo from the registry (e.g. one taken at the counter).
@@ -1638,10 +2023,12 @@
 
   function updatePickButton() {
     const n = reg.picked.size;
-    const btn = $('#print-cards');
-    if (btn.dataset.busy) return;
-    btn.disabled = !n;
-    btn.textContent = n ? `พิมพ์บัตร (${n})` : 'พิมพ์บัตร';
+    [['#print-cards', 'พิมพ์บัตร'], ['#print-photos', 'พิมพ์รูปถ่าย 2 นิ้ว']].forEach(([id, label]) => {
+      const btn = $(id);
+      if (btn.dataset.busy) return;
+      btn.disabled = !n;
+      btn.textContent = n ? `${label} (${n})` : label;
+    });
   }
 
   // ================================================================== wire up
@@ -1713,8 +2100,11 @@
     $('#reg-table').addEventListener('click', onRegistryClick);
     $('#reg-table').addEventListener('change', onRegistryPick);
     $('#print-cards').addEventListener('click', printCards);
+    $('#print-photos').addEventListener('click', printPhotos);
     $('#photo-input').addEventListener('change', onPhotoChosen);
+    $('#doc-input').addEventListener('change', onDocChosen);
     wireEditor();
+    wireDocViewer();
 
     if (location.hash === '#registry') switchView('registry');
   }

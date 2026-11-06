@@ -3,25 +3,33 @@
  *
  * Setup
  *   1. Create a Google Sheet in the company account → Extensions → Apps Script → paste this file.
- *   2. Run `setup()` once (authorize, incl. Google Drive for photos). It creates the sheets, the photo folder
- *      and an ADMIN_KEY (see Execution log). Run it again after updating this file if Google asks for new access.
+ *   2. Run `setup()` once (authorize, incl. Google Drive for photos and document copies). It creates the sheets, the
+ *      photo folder, the document-copy folder and an ADMIN_KEY (see Execution log). Run it again after updating this
+ *      file — it adds new columns and folders, and asks for any new access.
  *   3. Deploy → New deployment → Web app. Execute as: Me. Who has access: Anyone.
  *   4. Put the /exec URL into config.js (API_URL).
  *   After editing this file: Deploy → Manage deployments → Edit → Version: New version (same URL).
  *
  * API (POST, body = JSON as text/plain so the browser skips the CORS preflight)
  *   { action: "submit", data: {...} }            → public: save one application
- *   { action: "renewLookup", appId, applicantName } → public, for ต่ออายุ: NAMES (+ type, has photo) of a previous
+ *   { action: "renewLookup", appId, applicantName } → public, for ต่ออายุ: NAMES (+ type, has photo/copy) of a previous
  *                                                   application's members — only when the ผู้ยื่น name matches; failed
  *                                                   tries are rate-limited. On submit a member may carry
  *                                                   renewOf: {appId, seq}; blank age/address/ฐานะ/type are then copied
- *                                                   from that row (age + years passed) and its photo is kept.
+ *                                                   from that row (age + years passed); its photo and copy are kept.
  *   { action: "list",   key: "<ADMIN_KEY>" }     → staff: all applications + members (with photo thumbnails)
  *   { action: "photos", key, members: [{appId, seq}] }            → staff: full-size photos for printing cards
  *   { action: "setPhoto", key, appId, seq, photo, thumb }         → staff: add / replace a member's photo
+ *   { action: "doc",      key, appId, seq }                       → staff: view a member's document copy
+ *   { action: "setDoc",   key, appId, seq, doc: {type, data} }    → staff: add / replace a member's copy (or only its type)
  *
  * Photos: JPEG data URLs made in the browser (3:4, ~450×600 + a ~96×128 thumbnail). The full photo is saved as a
  * private file in a Google Drive folder (photo_id), the thumbnail is kept in the Members sheet (photo_thumb).
+ *
+ * Document copies (สำเนาบัตรประชาชน หรือ ทะเบียนบ้าน), one per member: JPEG (made in the browser, ≤1600 px) or PDF,
+ * saved as a private file in a second Drive folder (doc_id + doc_type in the Members sheet). Required for สมัครใหม่;
+ * ต่ออายุ keeps the copy on file and must attach one only when none is on file. Copies are never returned by the
+ * public actions — only `doc` (staff key) reads them. Personal data (PDPA): see TECHNICAL.md.
  *
  * Rules: ประกาศ ที่ ปก/ศช.บภ ๒-๑๘๙๙/๒๕๖๙ (แนวปฏิบัติเกี่ยวกับการใช้สถานที่การกีฬาของศูนย์ควบคุมการบินเชียงใหม่ พ.ศ. ๒๕๖๙)
  * Member types (ส่วนที่ ๒ ข้อ ๖)
@@ -40,12 +48,12 @@ const SHEET_MEMBERS = 'Members';
 const APP_HEADERS = [
   'app_id', 'year_be', 'form_date', 'applicant_name', 'applicant_type', 'department', 'position',
   'purpose', 'member_count', 'family_count', 'outsider_count', 'new_count', 'renew_count',
-  'photo_count', 'member_fee', 'card_fee', 'facility_fee', 'total_fee',
+  'photo_count', 'doc_count', 'member_fee', 'card_fee', 'facility_fee', 'total_fee',
   'renewed_from', 'created_at',
 ];
 const MEMBER_HEADERS = [
   'app_id', 'seq', 'full_name', 'age', 'address', 'relationship', 'member_type', 'membership',
-  'year_be', 'applicant_name', 'department', 'created_at', 'photo_id', 'photo_thumb',
+  'year_be', 'applicant_name', 'department', 'created_at', 'photo_id', 'photo_thumb', 'doc_id', 'doc_type',
 ];
 
 // Keep these in sync with config.js
@@ -68,6 +76,11 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const LOOKUP = { maxFailPerName: 5, maxFailTotal: 40, windowSec: 3600 };
 const PHOTO = { requiredForNew: true, maxBytes: 600 * 1024, maxThumbChars: 30000, perRequest: 24,
   folderName: 'รูปถ่ายสมาชิก (member-registry)' };
+// Copy of บัตรประชาชน or ทะเบียนบ้าน: required for สมัครใหม่; ต่ออายุ reuses the latest copy on file (same name + ผู้ยื่น)
+// and must attach one only if none is on file. Keep sizes in sync with DOC_* in app.js.
+const DOC = { requiredForNew: true, requiredOnRenewIfMissing: true, types: ['บัตรประชาชน', 'ทะเบียนบ้าน'],
+  maxJpegBytes: 900 * 1024, maxPdfBytes: 1536 * 1024, maxTotalBytes: 14 * 1024 * 1024,
+  folderName: 'สำเนาเอกสารสมาชิก (member-registry)' };
 const FAMILY_ROWS = LIMITS.maxMembers - RULES.maxOutsidersPerCertifier; // rows 1–9
 const APPLICANT_TYPES = ['พนักงาน', 'ลูกจ้าง', 'พนักงานเกษียณอายุ'];
 const MEMBERSHIP = ['สมัครใหม่', 'ต่ออายุ'];
@@ -97,6 +110,12 @@ function doPost(e) {
       case 'setPhoto':
         requireAdmin_(req.key);
         return json_(setPhoto_(req));
+      case 'doc':
+        requireAdmin_(req.key);
+        return json_(doc_(req.appId, req.seq));
+      case 'setDoc':
+        requireAdmin_(req.key);
+        return json_(setDoc_(req));
       case 'ping':
         return json_({ ok: true });
       default:
@@ -122,6 +141,7 @@ function setup() {
   }
   Logger.log('ADMIN_KEY (staff key for the registry): ' + props.getProperty('ADMIN_KEY'));
   Logger.log('Photo folder (private, Google Drive): ' + photoFolder_().getUrl());
+  Logger.log('Document-copy folder (private, Google Drive): ' + docFolder_().getUrl());
 }
 
 /**
@@ -221,20 +241,44 @@ function submit_(d) {
       throw httpError_('กรุณาแนบรูปถ่ายของสมาชิกคนที่ ' + (i + 1) + ' (สมัครใหม่)', 400);
     }
   });
+  // Same for the copies (บัตรประชาชน / ทะเบียนบ้าน). ต่ออายุ without one is checked under the lock, against the sheet.
+  const docs = raw.map(function (m, i) { return docBlob_(m && m.doc, 'ของสมาชิกคนที่ ' + (i + 1)); });
+  const docBytes = docs.reduce(function (sum, x) { return sum + (x ? x.blob.getBytes().length : 0); }, 0);
+  if (docBytes > DOC.maxTotalBytes) {
+    throw httpError_('สำเนาเอกสารรวมกันมีขนาดใหญ่เกินไป (สูงสุด ' + mb_(DOC.maxTotalBytes) +
+      ') — ใช้รูปถ่ายแทน PDF หรือแยกส่งเป็นหลายใบสมัคร', 400);
+  }
+  members.forEach(function (m, i) {
+    if (raw[i].keptDoc) { m.doc_id_ = raw[i].keptDoc.id; m.doc_type_ = raw[i].keptDoc.type; }
+    if (DOC.requiredForNew && !docs[i] && m.membership === 'สมัครใหม่') {
+      throw httpError_('กรุณาแนบสำเนาบัตรประชาชนหรือทะเบียนบ้านของสมาชิกคนที่ ' + (i + 1) + ' (สมัครใหม่)', 400);
+    }
+  });
 
   const fees = computeFees_(members);
   const createdAt = new Date();
   let photo = 0;
+  let docCount = 0;
 
   // Save photo files before taking the lock (Drive is slow); renamed to the application number afterwards.
   const files = [];
   const folder = blobs.some(Boolean) ? photoFolder_() : null;
-  blobs.forEach(function (blob, i) {
-    if (blob) files[i] = folder.createFile(blob.setName('pending-' + Utilities.getUuid() + '.jpg'));
-  });
+  const docFiles = [];
   const discardFiles = function () {
-    files.forEach(function (f) { try { f.setTrashed(true); } catch (e) { /* already gone */ } });
+    files.concat(docFiles).forEach(function (f) { try { if (f) f.setTrashed(true); } catch (e) { /* already gone */ } });
   };
+  try {
+    blobs.forEach(function (blob, i) {
+      if (blob) files[i] = folder.createFile(blob.setName('pending-' + Utilities.getUuid() + '.jpg'));
+    });
+    const dFolder = docs.some(Boolean) ? docFolder_() : null;
+    docs.forEach(function (doc, i) {
+      if (doc) docFiles[i] = dFolder.createFile(doc.blob.setName('pending-' + Utilities.getUuid() + doc.ext));
+    });
+  } catch (err) {
+    discardFiles();
+    throw err;
+  }
 
   const lock = LockService.getScriptLock();
   let appId;
@@ -243,7 +287,9 @@ function submit_(d) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ensureSheets_(ss);
     const reuse = members.map(function (m, i) { return !blobs[i] && !m.photo_id_ && m.membership === 'ต่ออายุ'; });
-    const existing = (outsiders.length || reuse.indexOf(true) >= 0) ? readObjects_(ss.getSheetByName(SHEET_MEMBERS)) : [];
+    const reuseDoc = members.map(function (m, i) { return !docs[i] && !m.doc_id_ && m.membership === 'ต่ออายุ'; });
+    const existing = (outsiders.length || reuse.indexOf(true) >= 0 || reuseDoc.indexOf(true) >= 0)
+      ? readObjects_(ss.getSheetByName(SHEET_MEMBERS)) : [];
 
     // ต่ออายุ without a new photo: keep the latest photo on file for the same member of the same ผู้ยื่น
     members.forEach(function (m, i) {
@@ -259,6 +305,25 @@ function submit_(d) {
       }
     });
     photo = members.filter(function (m, i) { return files[i] || m.photo_id_; }).length;
+
+    // ต่ออายุ without a new copy: keep the latest copy on file; none on file → the member must attach one
+    members.forEach(function (m, i) {
+      if (!reuseDoc[i]) return;
+      for (let r = existing.length - 1; r >= 0; r--) {
+        const e = existing[r];
+        if (e.doc_id && nameKey_(e.full_name) === nameKey_(m.full_name) &&
+            nameKey_(e.applicant_name) === nameKey_(app.applicant_name)) {
+          m.doc_id_ = String(e.doc_id);
+          m.doc_type_ = String(e.doc_type || '');
+          break;
+        }
+      }
+      if (DOC.requiredOnRenewIfMissing && !m.doc_id_) {
+        throw httpError_('สมาชิกคนที่ ' + (i + 1) + ' (' + m.full_name + ') ยังไม่มีสำเนาบัตรประชาชนหรือทะเบียนบ้านในระบบ ' +
+          'กรุณาแนบสำเนาเอกสาร', 400);
+      }
+    });
+    docCount = members.filter(function (m, i) { return docFiles[i] || m.doc_id_; }).length;
 
     if (outsiders.length) {
       // Count outsiders this person already certified in the same membership year (distinct names).
@@ -286,7 +351,7 @@ function submit_(d) {
     const appRow = Object.assign({
       app_id: appId, year_be: yearBE, form_date: formDate,
       member_count: members.length, family_count: fees.familyCount, outsider_count: fees.outsiderCount,
-      new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo,
+      new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo, doc_count: docCount,
       member_fee: fees.memberFee, card_fee: fees.cardFee, facility_fee: fees.facilityFee, total_fee: fees.total,
       created_at: createdAt,
     }, app);
@@ -295,7 +360,9 @@ function submit_(d) {
       return Object.assign({ app_id: appId, year_be: yearBE, applicant_name: app.applicant_name,
         department: app.department, created_at: createdAt,
         photo_id: files[i] ? files[i].getId() : (m.photo_id_ || ''),
-        photo_thumb: files[i] ? thumbs[i] : (m.photo_thumb_ || '') }, m);
+        photo_thumb: files[i] ? thumbs[i] : (m.photo_thumb_ || ''),
+        doc_id: docFiles[i] ? docFiles[i].getId() : (m.doc_id_ || ''),
+        doc_type: docFiles[i] ? docs[i].type : (m.doc_type_ || '') }, m);
     }));
     SpreadsheetApp.flush();
   } catch (err) {
@@ -307,10 +374,14 @@ function submit_(d) {
   files.forEach(function (f, i) {
     try { f.setName(photoName_(appId, members[i].seq, members[i].full_name)); } catch (e) { /* keep the temp name */ }
   });
+  docFiles.forEach(function (f, i) {
+    if (!f) return;
+    try { f.setName(docName_(appId, members[i].seq, members[i].full_name, docs[i].type, docs[i].ext)); } catch (e) { /* keep */ }
+  });
 
   const application = Object.assign({ app_id: appId, year_be: yearBE, form_date: formDate,
     member_count: members.length, family_count: fees.familyCount, outsider_count: fees.outsiderCount,
-    new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo,
+    new_count: fees.newCount, renew_count: fees.renewCount, photo_count: photo, doc_count: docCount,
     member_fee: fees.memberFee, card_fee: fees.cardFee, facility_fee: fees.facilityFee,
     total_fee: fees.total, created_at: createdAt.toISOString() }, app);
   return {
@@ -320,7 +391,8 @@ function submit_(d) {
     members: members.map(function (m, i) {
       return { app_id: appId, year_be: yearBE, seq: m.seq, full_name: m.full_name, age: m.age, address: m.address,
         relationship: m.relationship, member_type: m.member_type, membership: m.membership,
-        has_photo: !!(files[i] || m.photo_id_) };
+        has_photo: !!(files[i] || m.photo_id_), has_doc: !!(docFiles[i] || m.doc_id_),
+        doc_type: docFiles[i] ? docs[i].type : (m.doc_type_ || '') };
     }),
   };
 }
@@ -338,8 +410,8 @@ function list_() {
 
 /**
  * ต่ออายุ from the public form: the employee types their name and the application no. printed on last year's form.
- * Both must match. Only member names (+ type, whether a photo is on file) are returned — the rest stays in the sheet
- * and is copied on submit (renewOf), so the web form never shows ages, addresses, ฐานะ or photos.
+ * Both must match. Only member names (+ type, whether a photo / document copy is on file) are returned — the rest stays
+ * in the sheet and is copied on submit (renewOf), so the web form never shows ages, addresses, ฐานะ, photos or copies.
  */
 function renewLookup_(appIdIn, nameIn) {
   const appId = String(appIdIn || '').trim();
@@ -355,16 +427,17 @@ function renewLookup_(appIdIn, nameIn) {
   }
   const rows = readObjects_(ss.getSheetByName(SHEET_MEMBERS));
   // a photo is "on file" if this row has one or a later form of the same member + ผู้ยื่น does (what submit reuses)
-  const hasPhoto = function (m) {
-    return !!m.photo_id || rows.some(function (r) {
-      return r.photo_id && nameKey_(r.full_name) === nameKey_(m.full_name) && nameKey_(r.applicant_name) === nameKey_(app.applicant_name);
+  const onFile = function (m, col) {
+    return !!m[col] || rows.some(function (r) {
+      return r[col] && nameKey_(r.full_name) === nameKey_(m.full_name) && nameKey_(r.applicant_name) === nameKey_(app.applicant_name);
     });
   };
   const members = rows
     .filter(function (m) { return String(m.app_id) === appId; })
     .sort(function (a, b) { return Number(a.seq) - Number(b.seq); })
     .map(function (m) {
-      return { seq: Number(m.seq), full_name: m.full_name, member_type: m.member_type, has_photo: hasPhoto(m) };
+      return { seq: Number(m.seq), full_name: m.full_name, member_type: m.member_type,
+        has_photo: onFile(m, 'photo_id'), has_doc: onFile(m, 'doc_id') };
     });
   return {
     ok: true,
@@ -396,7 +469,7 @@ function previousApp_(apps, appId, applicantName) {
 
 /**
  * Members renewed through the public lookup carry renewOf {appId, seq}. Re-check the pair against the ผู้ยื่น name,
- * then fill whatever was left blank from the stored row (age + years passed) and remember its photo.
+ * then fill whatever was left blank from the stored row (age + years passed) and remember its photo and copy.
  */
 function resolveRenewals_(raw, applicantName, yearBE) {
   if (!raw.some(function (m) { return m && m.renewOf; })) return raw;
@@ -424,6 +497,7 @@ function resolveRenewals_(raw, applicantName, yearBE) {
       relationship: blank(m.relationship) ? old.relationship : m.relationship,
       memberType: blank(m.memberType) ? old.member_type : m.memberType,
       keptPhoto: old.photo_id ? { id: String(old.photo_id), thumb: String(old.photo_thumb || '') } : null,
+      keptDoc: old.doc_id ? { id: String(old.doc_id), type: String(old.doc_type || '') } : null,
     });
   });
 }
@@ -472,6 +546,64 @@ function setPhoto_(req) {
   return { ok: true, photo_id: file.getId(), photo_thumb: thumb };
 }
 
+/** Staff views one member's document copy → { type, mime, name, data: "data:<mime>;base64,…" }. */
+function doc_(appIdIn, seqIn) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheets_(ss);
+  const key = memberKey_(appIdIn, seqIn);
+  const row = readObjects_(ss.getSheetByName(SHEET_MEMBERS)).filter(function (r) {
+    return memberKey_(r.app_id, r.seq) === key;
+  })[0];
+  if (!row) throw httpError_('ไม่พบสมาชิก ' + appIdIn + ' ลำดับ ' + seqIn, 404);
+  if (!row.doc_id) throw httpError_('สมาชิกคนนี้ยังไม่มีสำเนาเอกสาร', 404);
+  let file;
+  try {
+    file = DriveApp.getFileById(String(row.doc_id));
+    if (file.isTrashed()) throw new Error('trashed');
+  } catch (e) {
+    throw httpError_('ไม่พบไฟล์สำเนาเอกสารใน Google Drive (อาจถูกลบไปแล้ว) — แนบใหม่ได้ที่ปุ่ม "สำเนา"', 404);
+  }
+  const blob = file.getBlob();
+  const mime = blob.getContentType() === 'application/pdf' ? 'application/pdf' : 'image/jpeg';
+  return { ok: true, doc: { type: String(row.doc_type || ''), mime: mime, name: file.getName(),
+    data: 'data:' + mime + ';base64,' + Utilities.base64Encode(blob.getBytes()) } };
+}
+
+/**
+ * Staff adds or replaces one member's copy (e.g. scanned at the counter): doc = {type, data}. The old file goes to the
+ * Drive trash. Without data only the type (บัตรประชาชน / ทะเบียนบ้าน) of the copy on file is changed.
+ */
+function setDoc_(req) {
+  const appId = String(req.appId || '');
+  const seq = Number(req.seq);
+  const d = req.doc || {};
+  const doc = docBlob_(d, '');
+  const type = doc ? doc.type : oneOf_(d.type, DOC.types, 'ชนิดของสำเนาเอกสาร');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheets_(ss);
+  const sh = ss.getSheetByName(SHEET_MEMBERS);
+  const headers = ensureHeaders_(sh, MEMBER_HEADERS);
+  const values = sh.getDataRange().getValues();
+  const col = function (name) { return headers.indexOf(name); };
+  let row = -1;
+  for (let r = 1; r < values.length; r++) {
+    if (memberKey_(values[r][col('app_id')], values[r][col('seq')]) === memberKey_(appId, seq)) { row = r; break; }
+  }
+  if (row < 0) throw httpError_('ไม่พบสมาชิก ' + appId + ' ลำดับ ' + req.seq, 404);
+  const old = String(values[row][col('doc_id')] || '');
+  let id = old;
+  if (doc) {
+    const file = docFolder_().createFile(doc.blob.setName(docName_(appId, seq, values[row][col('full_name')], type, doc.ext)));
+    id = file.getId();
+    sh.getRange(row + 1, col('doc_id') + 1).setValue(id);
+  } else if (!old) {
+    throw httpError_('กรุณาเลือกไฟล์สำเนาเอกสาร', 400);
+  }
+  sh.getRange(row + 1, col('doc_type') + 1).setValue(type);
+  if (doc && old) { try { DriveApp.getFileById(old).setTrashed(true); } catch (e) { /* already gone */ } }
+  return { ok: true, doc_id: id, doc_type: type };
+}
+
 // ---------------------------------------------------------------- photos
 /** "data:image/jpeg;base64,…" → Blob, or null when no photo was given. */
 function photoBlob_(dataUrl, label) {
@@ -496,24 +628,68 @@ function thumb_(v, label) {
 }
 
 function photoFolder_() {
+  return folder_('PHOTO_FOLDER_ID', PHOTO.folderName, 'รูปถ่าย');
+}
+
+function docFolder_() {
+  return folder_('DOC_FOLDER_ID', DOC.folderName, 'สำเนาเอกสาร');
+}
+
+/** Private Drive folder kept by id in Script Properties; made again if it was deleted. */
+function folder_(prop, name, what) {
   const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('PHOTO_FOLDER_ID');
+  const id = props.getProperty(prop);
   try {
     if (id) {
       const existing = DriveApp.getFolderById(id);
       if (!existing.isTrashed()) return existing;
     }
-    const folder = DriveApp.createFolder(PHOTO.folderName);
-    props.setProperty('PHOTO_FOLDER_ID', folder.getId());
+    const folder = DriveApp.createFolder(name);
+    props.setProperty(prop, folder.getId());
     return folder;
   } catch (e) {
-    throw httpError_('ระบบยังเก็บรูปถ่ายไม่ได้ เพราะยังไม่ได้อนุญาต Google Drive — ผู้ดูแลเปิด Apps Script รัน setup ' +
+    throw httpError_('ระบบยังเก็บ' + what + 'ไม่ได้ เพราะยังไม่ได้อนุญาต Google Drive — ผู้ดูแลเปิด Apps Script รัน setup ' +
       'แล้วติ๊กสิทธิ์ Google Drive (หรือ "เลือกทั้งหมด") ในหน้าขออนุญาต จากนั้น Deploy เป็น New version (' + (e.message || e) + ')', 500);
   }
 }
 
 function photoName_(appId, seq, fullName) {
   return appId + '-' + ('0' + seq).slice(-2) + ' ' + String(fullName || '').replace(/[\\/:*?"<>|]/g, ' ').trim() + '.jpg';
+}
+
+// ---------------------------------------------------------------- document copies
+/**
+ * {type, data: "data:image/jpeg;base64,…" | "data:application/pdf;base64,…"} → {blob, type, ext}, or null when no
+ * copy was given. The content is checked (JPEG / PDF signature), not just the label.
+ */
+function docBlob_(doc, label) {
+  const data = doc && typeof doc === 'object' ? doc.data : doc;
+  if (data === undefined || data === null || data === '') return null;
+  const m = /^data:(image\/jpeg|application\/pdf);base64,([A-Za-z0-9+\/]+=*)$/.exec(String(data));
+  if (!m) throw httpError_('สำเนาเอกสาร' + label + ' ต้องเป็นรูปภาพ (JPEG) หรือไฟล์ PDF', 400);
+  const pdf = m[1] === 'application/pdf';
+  const max = pdf ? DOC.maxPdfBytes : DOC.maxJpegBytes;
+  if (m[2].length > max * 4 / 3 + 4) {
+    throw httpError_('สำเนาเอกสาร' + label + ' มีขนาดใหญ่เกินไป (' + (pdf ? 'PDF' : 'รูปภาพ') + ' สูงสุด ' + mb_(max) + ')', 400);
+  }
+  const bytes = Utilities.base64Decode(m[2]);
+  const b = function (i) { return bytes[i] & 0xff; };
+  const ok = pdf ? (bytes.length > 4 && b(0) === 0x25 && b(1) === 0x50 && b(2) === 0x44 && b(3) === 0x46) // %PDF
+    : (bytes.length > 4 && b(0) === 0xff && b(1) === 0xd8);
+  if (!ok) throw httpError_('สำเนาเอกสาร' + label + ' ไม่ใช่ไฟล์ ' + (pdf ? 'PDF' : 'JPEG') + ' ที่ถูกต้อง', 400);
+  return {
+    blob: Utilities.newBlob(bytes, m[1], pdf ? 'doc.pdf' : 'doc.jpg'),
+    type: oneOf_(doc && doc.type, DOC.types, 'ชนิดของสำเนาเอกสาร' + label + ' (บัตรประชาชน / ทะเบียนบ้าน)'),
+    ext: pdf ? '.pdf' : '.jpg',
+  };
+}
+
+function docName_(appId, seq, fullName, type, ext) {
+  return photoName_(appId, seq, fullName).replace(/\.jpg$/, '') + ' (สำเนา' + type + ')' + ext;
+}
+
+function mb_(bytes) {
+  return (Math.round(bytes / 1024 / 1024 * 10) / 10) + ' MB';
 }
 
 function memberKey_(appId, seq) {

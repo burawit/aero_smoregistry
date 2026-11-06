@@ -133,7 +133,7 @@
           <h2>บันทึกใบสมัครแล้ว</h2>
           <p>เลขที่ใบสมัคร <strong class="app-no" id="success-id"></strong></p>
           <p class="muted" id="success-summary"></p>
-          <p class="muted" id="success-next">พิมพ์ใบสมัคร ลงลายมือชื่อ แล้วส่งพร้อมค่าธรรมเนียมให้เจ้าหน้าที่ (รูปถ่ายแนบในระบบแล้ว)</p>
+          <p class="muted" id="success-next">พิมพ์ใบสมัคร ลงลายมือชื่อ แล้วส่งพร้อมค่าธรรมเนียมให้เจ้าหน้าที่ (รูปถ่ายและสำเนาเอกสารแนบในระบบแล้ว ไม่ต้องส่งรูปกระดาษ)</p>
           <div class="form-actions center">
             <button type="button" class="btn btn-ghost" id="new-form">กรอกใบใหม่</button>
             <button type="button" class="btn btn-primary" id="print-saved">พิมพ์ใบสมัคร</button>
@@ -145,7 +145,7 @@
       <section id="view-registry" class="view" aria-labelledby="reg-title" hidden>
         <div class="page-head">
           <h1 id="reg-title">ทะเบียนสมาชิก</h1>
-          <p>สำหรับเจ้าหน้าที่ — ค้นหา ตรวจสอบรายชื่อที่ต้องต่ออายุ เพิ่มรูปถ่าย พิมพ์ใบสมัครและบัตรสมาชิก และส่งออกข้อมูล</p>
+          <p>สำหรับเจ้าหน้าที่ — ค้นหา ตรวจสอบรายชื่อที่ต้องต่ออายุ เพิ่มรูปถ่ายและสำเนาเอกสาร พิมพ์ใบสมัครและบัตรสมาชิก และส่งออกข้อมูล</p>
         </div>
 
         <div id="lock" class="card lock" hidden>
@@ -178,6 +178,7 @@
             </select>
             <div class="toolbar-actions">
               <button type="button" class="btn btn-primary btn-sm" id="print-cards" disabled>พิมพ์บัตร</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="print-photos" disabled>พิมพ์รูปถ่าย 2 นิ้ว</button>
               <button type="button" class="btn btn-ghost btn-sm" id="refresh">รีเฟรช</button>
               <button type="button" class="btn btn-ghost btn-sm" id="export">ส่งออก CSV</button>
               <button type="button" class="btn btn-ghost btn-sm" id="logout" hidden>ออกจากระบบ</button>
@@ -188,7 +189,10 @@
           </div>
           <p class="muted small" id="reg-count"></p>
           <p class="muted small">ติ๊กเลือกสมาชิกที่ยังใช้งานปีนี้ แล้วกด "พิมพ์บัตร" — พิมพ์บนกระดาษ A4 แผ่นละ 10 ใบ แบบสองหน้า
-            (กลับด้านยาว) ตัดตามเส้นแล้วเคลือบ · แตะรูปเพื่อเพิ่มหรือเปลี่ยนรูปถ่าย (จัดตำแหน่งใบหน้าได้ก่อนบันทึก)</p>
+            (กลับด้านยาว) ตัดตามเส้นแล้วเคลือบ · แตะรูปเพื่อเพิ่มหรือเปลี่ยนรูปถ่าย (จัดตำแหน่งใบหน้าได้ก่อนบันทึก)
+            · แตะไอคอนเอกสารเพื่อดูหรือแนบสำเนาบัตรประชาชน / ทะเบียนบ้าน
+            · "พิมพ์รูปถ่าย 2 นิ้ว" พิมพ์รูปของคนที่ติ๊กไว้ ขนาด 3.8 × 4.5 ซม. คนละ 2 รูป (แผ่นละ 10 คน) สำหรับแนบเอกสาร
+            — ตั้งเครื่องพิมพ์เป็นขนาดจริง 100%</p>
         </div>
       </section>
     </main>
@@ -198,6 +202,28 @@
 
   <div id="print-root"></div>
   <input type="file" id="photo-input" accept="image/*" hidden>
+  <input type="file" id="doc-input" accept="image/*,application/pdf,.pdf" hidden>
+
+  <!-- staff: view / attach a member's copy of บัตรประชาชน or ทะเบียนบ้าน -->
+  <div class="modal" id="doc-viewer" role="dialog" aria-modal="true" aria-labelledby="dv-title" hidden>
+    <div class="modal-card dv-card">
+      <h2 id="dv-title">สำเนาเอกสาร</h2>
+      <p class="hint" id="dv-sub"></p>
+      <div class="dv-body" id="dv-body"></div>
+      <p class="hint dv-status-row"><span id="dv-status"></span>
+        <a class="link-btn" id="dv-open" href="#" target="_blank" rel="noopener" hidden>เปิด PDF เต็มหน้าจอ</a></p>
+      <fieldset class="dv-type-field">
+        <legend class="label">ชนิดของสำเนา</legend>
+        <div class="seg small chips" id="dv-type"></div>
+      </fieldset>
+      <p class="hint dv-pdpa">ข้อมูลส่วนบุคคล — ใช้ตรวจสอบการสมัครสมาชิกเท่านั้น ไม่ดาวน์โหลดเก็บหรือส่งต่อ</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="dv-close">ปิด</button>
+        <button type="button" class="btn btn-ghost" id="dv-pick">แนบไฟล์</button>
+        <button type="button" class="btn btn-primary" id="dv-save" hidden>บันทึก</button>
+      </div>
+    </div>
+  </div>
 
   <!-- square photo editor: drag to place the face, zoom, rotate -->
   <div class="modal" id="photo-editor" role="dialog" aria-modal="true" aria-labelledby="pe-title" hidden>

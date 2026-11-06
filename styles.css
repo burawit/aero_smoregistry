@@ -744,6 +744,189 @@ body.modal-open {
   height: 32px;
 }
 
+/* copy of บัตรประชาชน / ทะเบียนบ้าน (form) */
+.doc-type {
+  margin-bottom: 8px;
+}
+
+.doc-box {
+  position: relative;
+  flex: none;
+  width: 96px;
+  height: 72px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: #b8c1cf;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.doc-box svg {
+  width: 34px;
+  height: 34px;
+}
+
+.doc-box.has-doc {
+  border-style: solid;
+  border-color: var(--line);
+  background: #fff;
+  color: var(--primary);
+}
+
+.doc-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.doc-ext {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.doc-box.invalid {
+  border-color: var(--danger);
+  background: #fdecea;
+  color: #e5a9a3;
+}
+
+.doc-field.is-renew .doc-box {
+  width: 72px;
+  height: 54px;
+}
+
+.doc-field.is-renew .doc-box svg {
+  width: 26px;
+  height: 26px;
+}
+
+.doc-field .photo-actions .hint {
+  overflow-wrap: anywhere;
+}
+
+/* registry: copy status next to the photo */
+.doc-thumb {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 44px;
+  padding: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--primary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.doc-thumb svg {
+  width: 20px;
+  height: 20px;
+}
+
+.doc-tag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.doc-thumb.no-doc {
+  border-style: dashed;
+  border-color: #e0b36b;
+  background: var(--warn-soft);
+  color: #c9a46a;
+}
+
+.doc-thumb.no-doc .doc-tag {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--warn);
+  bottom: -1px;
+}
+
+.doc-thumb:hover {
+  border-color: var(--primary);
+}
+
+/* staff: copy viewer */
+.dv-card {
+  width: min(760px, 100%);
+}
+
+.dv-body {
+  height: min(62vh, 560px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: auto;
+  display: grid;
+  place-items: center;
+}
+
+.dv-body img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+.dv-body iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.dv-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 20px;
+}
+
+.dv-empty svg {
+  width: 48px;
+  height: 48px;
+  color: #b8c1cf;
+}
+
+.dv-type-field {
+  border: 0;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.dv-pdpa {
+  margin-top: 10px;
+  color: var(--warn);
+}
+
+.dv-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin-top: 6px;
+}
+
+.dv-status-row a[hidden] {
+  display: none;
+}
+
 /* registry: pick for card printing + photo thumbnail */
 .reg-table .pick-cell {
   width: 1%;
@@ -1191,7 +1374,7 @@ body.modal-open {
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -1397,6 +1580,12 @@ body.modal-open {
 }
 
 /* ---------- responsive ---------- */
+@media (max-width: 1060px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   .tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1907,8 +2096,8 @@ body.modal-open {
   gap: 2mm;
   height: 10.5mm;
   padding: 0 3.5mm;
-  background: #1d3a6e;
-  color: #fff;
+  background: var(--cd-navy, #1d3a6e);
+  color: var(--cd-on, #fff);
   flex: none;
 }
 
@@ -1935,18 +2124,19 @@ body.modal-open {
   align-items: center;
   height: 5mm;
   padding: 0 3.5mm;
-  color: #fff;
+  color: var(--cd-on, #fff);
   font-size: 7pt;
   font-weight: 700;
   flex: none;
 }
 
+/* colours come from app.js (lightened by CARD_DIM to save ink); fallbacks = full colour */
 .t-fam .cd-type {
-  background: #1971c2;
+  background: var(--cd-fam, #1971c2);
 }
 
 .t-out .cd-type {
-  background: #e8590c;
+  background: var(--cd-out, #e8590c);
 }
 
 .cd-no {
@@ -1968,14 +2158,14 @@ body.modal-open {
   width: 25mm;
   height: 25mm;
   padding: .6mm;
-  border: .7mm solid #1971c2;
+  border: .7mm solid var(--cd-fam, #1971c2);
   border-radius: 1.2mm;
   background: #fff;
   overflow: hidden;
 }
 
 .t-out .cd-photo {
-  border-color: #e8590c;
+  border-color: var(--cd-out, #e8590c);
 }
 
 .cd-photo img {
@@ -2077,11 +2267,11 @@ body.modal-open {
 }
 
 .t-fam.cd-back::before {
-  background: #1971c2;
+  background: var(--cd-fam, #1971c2);
 }
 
 .t-out.cd-back::before {
-  background: #e8590c;
+  background: var(--cd-out, #e8590c);
 }
 
 .cd-back-head {
@@ -2134,4 +2324,89 @@ body.modal-open {
   font-size: 6.6pt;
   color: #4b5563;
   text-align: center;
+}
+
+/* =====================================================================
+   PRINT — photo sheets: 2-inch photos (3.8 × 4.5 cm), 2 per member, A4, 2 × 5 members per sheet
+   (the page margin is set to 0 by app.js while printing photos — print at 100 %, not "fit to page")
+   ===================================================================== */
+.ps-print {
+  font-family: "Sarabun", "TH Sarabun New", sans-serif;
+  color: #111827;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.ps-sheet {
+  position: relative;
+  width: 210mm;
+  height: 296.5mm;
+  overflow: hidden;
+  break-after: page;
+  page-break-after: always;
+}
+
+.ps-sheet:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.ps-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3.5mm;
+  text-align: center;
+  font-size: 7pt;
+  color: #9ca3af;
+}
+
+.ps-grid {
+  position: absolute;
+  left: 21mm;
+  top: 10mm;
+  display: grid;
+  grid-template-columns: repeat(2, 78mm);
+  column-gap: 12mm;
+  row-gap: 4.5mm;
+  align-content: start;
+}
+
+.ps-pair {
+  display: flex;
+  gap: 2mm;
+}
+
+.ps-photo {
+  flex: none;
+  width: 38mm;
+  height: 45mm;
+  overflow: hidden;
+  outline: .2mm solid #9ca3af; /* cut line, outside the photo */
+  background: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.ps-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 40%;
+  display: block;
+}
+
+.ps-none {
+  font-size: 8pt;
+  color: #9ca3af;
+}
+
+.ps-cap {
+  width: 78mm;
+  margin-top: 1.2mm;
+  font-size: 7.5pt;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  color: #374151;
 }

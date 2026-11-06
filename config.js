@@ -16,6 +16,7 @@ window.APP_CONFIG = {
 
   // บัตรสมาชิก (optional)
   CARD_LOGO: "images/logo-seal.svg",       // ตราบริษัทที่หัวบัตร (โลโก้เต็ม: images/logo-aerothai.svg)
+  CARD_DIM: 40,                            // % ที่ทำให้สีบนบัตรอ่อนลงเพื่อประหยัดหมึก (0 = สีเต็ม) · รูปถ่ายไม่ถูกลดสี
   // CARD_CONTACT: "โทร 0 5320 0000",        // ด้านหลังบัตร ต่อท้าย "หากพบบัตรนี้ โปรดส่งคืน…"
 
   // Printed on the staff section of the form
